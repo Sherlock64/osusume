@@ -12,8 +12,11 @@ import {
   listEntry,
   listSettings,
   season,
+  seasonTag,
   series,
+  seriesTag,
   session,
+  tag,
   user,
   usernameChangeRequest,
 } from './schema.ts';
@@ -211,6 +214,84 @@ describe('removing a user', () => {
     expect(blacklisted?.bannedBy).toBeNull();
   });
 
+  it('revokes approved invites the user requested and leaves other statuses alone', async () => {
+    const removed = await createUser();
+    const other = await createUser();
+    const before = new Date('2020-01-01T00:00:00.000Z');
+    const rows = await db
+      .insert(inviteRequest)
+      .values([
+        {
+          requesterId: removed.id,
+          inviteeEmail: 'approved@example.test',
+          status: 'approved',
+          tokenHash: `hash-${removed.id}`,
+          expiresAt: new Date(Date.now() + 60_000),
+          updatedAt: before,
+        },
+        { requesterId: removed.id, inviteeEmail: 'used@example.test', status: 'accepted' },
+        { requesterId: removed.id, inviteeEmail: 'no@example.test', status: 'rejected' },
+        { requesterId: other.id, inviteeEmail: 'others@example.test', status: 'approved' },
+      ])
+      .returning();
+
+    await db.delete(user).where(eq(user.id, removed.id));
+
+    const statusOf = async (index: number) => {
+      const id = rows[index]?.id;
+      if (id === undefined) throw new Error('invite was not created');
+      const [row] = await db.select().from(inviteRequest).where(eq(inviteRequest.id, id));
+      return row;
+    };
+    const revoked = await statusOf(0);
+    expect(revoked).toMatchObject({ status: 'revoked', requesterId: null });
+    expect(revoked?.updatedAt.getTime()).toBeGreaterThan(before.getTime());
+    expect(await statusOf(1)).toMatchObject({ status: 'accepted', requesterId: null });
+    expect(await statusOf(2)).toMatchObject({ status: 'rejected', requesterId: null });
+    expect(await statusOf(3)).toMatchObject({ status: 'approved', requesterId: other.id });
+  });
+
+  it('deletes invite rows holding the removed email, whoever requested them', async () => {
+    const removed = await createUser({ email: 'gone@example.test' });
+    const inviter = await createUser();
+    await db.insert(inviteRequest).values([
+      { requesterId: inviter.id, inviteeEmail: 'gone@example.test', status: 'accepted' },
+      { requesterId: inviter.id, inviteeEmail: 'GONE@example.test', status: 'rejected' },
+      { requesterId: null, inviteeEmail: 'Gone@Example.Test', status: 'revoked' },
+      { requesterId: inviter.id, inviteeEmail: 'stays@example.test', status: 'accepted' },
+    ]);
+
+    await db.delete(user).where(eq(user.id, removed.id));
+
+    const left = await db
+      .select({ email: inviteRequest.inviteeEmail })
+      .from(inviteRequest)
+      .where(eq(inviteRequest.requesterId, inviter.id));
+    expect(left).toEqual([{ email: 'stays@example.test' }]);
+    const all = await db.select({ email: inviteRequest.inviteeEmail }).from(inviteRequest);
+    expect(all.filter((row) => row.email.toLowerCase() === 'gone@example.test')).toEqual([]);
+  });
+
+  it('keeps a banned address on the blacklist', async () => {
+    const banned = await createUser({ email: 'banned-user@example.test' });
+    const inviter = await createUser();
+    await db
+      .insert(inviteRequest)
+      .values({ requesterId: inviter.id, inviteeEmail: banned.email, status: 'accepted' });
+
+    await db.transaction(async (tx) => {
+      await tx.insert(emailBlacklist).values({ email: banned.email });
+      await tx.delete(user).where(eq(user.id, banned.id));
+    });
+
+    expect(
+      await db.select().from(emailBlacklist).where(eq(emailBlacklist.email, banned.email)),
+    ).toHaveLength(1);
+    expect(
+      await db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, banned.email)),
+    ).toEqual([]);
+  });
+
   it('frees the email and username for a new account', async () => {
     const removed = await createUser({ username: 'reused', email: 'reused@example.test' });
     await db.delete(user).where(eq(user.id, removed.id));
@@ -353,6 +434,115 @@ describe('schema constraints', () => {
     await expect(
       db.insert(listEntry).values({ userId: a.id, seasonId: child.id, status: 'dropped' }),
     ).rejects.toMatchObject({ cause: { constraint: 'list_entry_user_id_season_id_unique' } });
+  });
+
+  it('allows one pending invite per email, ignoring case', async () => {
+    const [a, b] = await twoUsers();
+    await db
+      .insert(inviteRequest)
+      .values({ requesterId: a.id, inviteeEmail: 'One@example.test', status: 'pending' });
+    await expect(
+      db.insert(inviteRequest).values({ requesterId: b.id, inviteeEmail: 'one@EXAMPLE.test' }),
+    ).rejects.toMatchObject({ cause: { constraint: 'invite_request_one_pending_per_email' } });
+
+    // Requests that are no longer pending do not count, and other emails are unaffected.
+    await db.insert(inviteRequest).values([
+      { requesterId: a.id, inviteeEmail: 'one@example.test', status: 'rejected' },
+      { requesterId: a.id, inviteeEmail: 'one@example.test', status: 'revoked' },
+      { requesterId: a.id, inviteeEmail: 'two@example.test', status: 'pending' },
+    ]);
+  });
+
+  it('allows one pending username change per user', async () => {
+    const [a, b] = await twoUsers();
+    await db.insert(usernameChangeRequest).values({ userId: a.id, requestedUsername: 'first' });
+    await expect(
+      db.insert(usernameChangeRequest).values({ userId: a.id, requestedUsername: 'second' }),
+    ).rejects.toMatchObject({
+      cause: { constraint: 'username_change_request_one_pending_per_user' },
+    });
+
+    await db.insert(usernameChangeRequest).values([
+      { userId: a.id, requestedUsername: 'older', status: 'rejected' },
+      { userId: a.id, requestedUsername: 'oldest', status: 'approved' },
+      { userId: b.id, requestedUsername: 'first' },
+    ]);
+  });
+
+  it('requires only a title and ordinal on a season', async () => {
+    const [parent] = await db.insert(series).values({ title: 'Optional fields' }).returning();
+    if (!parent) throw new Error('series was not created');
+    const [row] = await db
+      .insert(season)
+      .values({ seriesId: parent.id, ordinal: 1, title: 'Undated' })
+      .returning();
+    expect(row).toMatchObject({
+      year: null,
+      seasonOfYear: null,
+      episodeCount: null,
+      synopsis: null,
+      coverImageId: null,
+      altTitles: [],
+    });
+    expect(parent).toMatchObject({ synopsis: null, coverImageId: null, altTitles: [] });
+  });
+
+  it('refuses to delete a season on a list or a series with seasons', async () => {
+    const [a] = await twoUsers();
+    const [parent] = await db.insert(series).values({ title: 'In use' }).returning();
+    if (!parent) throw new Error('series was not created');
+    const [child] = await db
+      .insert(season)
+      .values({ seriesId: parent.id, ordinal: 1, title: 'On a list' })
+      .returning();
+    if (!child) throw new Error('season was not created');
+    await db.insert(listEntry).values({ userId: a.id, seasonId: child.id, status: 'watching' });
+
+    await expect(db.delete(season).where(eq(season.id, child.id))).rejects.toMatchObject({
+      cause: { constraint: 'list_entry_season_id_season_id_fk' },
+    });
+    await expect(db.delete(series).where(eq(series.id, parent.id))).rejects.toMatchObject({
+      cause: { constraint: 'season_series_id_series_id_fk' },
+    });
+
+    await db.delete(listEntry).where(eq(listEntry.seasonId, child.id));
+    await db.delete(season).where(eq(season.id, child.id));
+    await db.delete(series).where(eq(series.id, parent.id));
+    expect(await db.select().from(series).where(eq(series.id, parent.id))).toEqual([]);
+  });
+
+  it('detaches a deleted tag from every series and season', async () => {
+    const [parent] = await db.insert(series).values({ title: 'Tagged' }).returning();
+    if (!parent) throw new Error('series was not created');
+    const [child] = await db
+      .insert(season)
+      .values({ seriesId: parent.id, ordinal: 1, title: 'Tagged season' })
+      .returning();
+    if (!child) throw new Error('season was not created');
+    const [removed, kept] = await db
+      .insert(tag)
+      .values([{ name: 'removed' }, { name: 'kept' }])
+      .returning();
+    if (!removed || !kept) throw new Error('tags were not created');
+    await db.insert(seriesTag).values([
+      { seriesId: parent.id, tagId: removed.id },
+      { seriesId: parent.id, tagId: kept.id },
+    ]);
+    await db.insert(seasonTag).values([
+      { seasonId: child.id, tagId: removed.id },
+      { seasonId: child.id, tagId: kept.id },
+    ]);
+
+    await db.delete(tag).where(eq(tag.id, removed.id));
+
+    expect(await db.select().from(seriesTag).where(eq(seriesTag.seriesId, parent.id))).toEqual([
+      { seriesId: parent.id, tagId: kept.id },
+    ]);
+    expect(await db.select().from(seasonTag).where(eq(seasonTag.seasonId, child.id))).toEqual([
+      { seasonId: child.id, tagId: kept.id },
+    ]);
+    expect(await db.select().from(series).where(eq(series.id, parent.id))).toHaveLength(1);
+    expect(await db.select().from(season).where(eq(season.id, child.id))).toHaveLength(1);
   });
 
   it('matches blacklisted and account emails case-insensitively', async () => {

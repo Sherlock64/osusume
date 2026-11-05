@@ -36,12 +36,14 @@ import {
  *              and reviewed_by, invite_request.requester_id and decided_by,
  *              username_change_request.decided_by and email_blacklist.banned_by.
  *              The record stays with the identity blanked.
- *   TRIGGER    user_before_delete (migration 0002) deletes the user's pending
- *              catalog and invite requests, which a foreign key cannot single
- *              out, and refuses to delete the first admin.
+ *   TRIGGER    user_before_delete (migration 0004), for what depends on row contents:
+ *              - deletes the user's pending catalog and invite requests;
+ *              - revokes invites they requested that are approved but unaccepted;
+ *              - deletes invite rows holding the user's own email;
+ *              - refuses to delete the first admin.
  *
- * Banning is a removal plus an email_blacklist row. Nothing else holds on to the
- * email, so a removed user's address can be invited again.
+ * Banning is a removal plus an email_blacklist row, which keeps the address. After
+ * a plain removal the address can be invited again.
  */
 
 export const userRole = pgEnum('user_role', userRoles);
@@ -173,6 +175,9 @@ export const usernameChangeRequest = pgTable(
   },
   (t) => [
     index('username_change_request_user_id_idx').on(t.userId),
+    uniqueIndex('username_change_request_one_pending_per_user')
+      .on(t.userId)
+      .where(sql`${t.status} = 'pending'`),
     index('username_change_request_status_idx').on(t.status, t.createdAt),
   ],
 );
@@ -196,6 +201,11 @@ export const inviteRequest = pgTable(
     index('invite_request_requester_id_idx').on(t.requesterId),
     index('invite_request_status_idx').on(t.status, t.createdAt),
     index('invite_request_invitee_email_idx').on(sql`lower(${t.inviteeEmail})`),
+    // Part of the one-open-invite rule. Approved invites also count as open until
+    // they expire, which depends on the clock, so the application enforces that part.
+    uniqueIndex('invite_request_one_pending_per_email')
+      .on(sql`lower(${t.inviteeEmail})`)
+      .where(sql`${t.status} = 'pending'`),
   ],
 );
 
@@ -295,16 +305,16 @@ export const season = pgTable(
   'season',
   {
     id: primaryId(),
-    // RESTRICT for now: what deleting a series with seasons should do is undecided,
-    // and this choice cannot lose data.
+    // A series that still has seasons cannot be deleted.
     seriesId: uuid()
       .notNull()
       .references(() => series.id, { onDelete: 'restrict' }),
     ordinal: integer().notNull(),
     title: text().notNull(),
     altTitles: text().array().notNull().default(sql`'{}'::text[]`),
-    year: integer().notNull(),
-    seasonOfYear: seasonOfYear().notNull(),
+    /** Optional, as is seasonOfYear. Sorting and display must handle blanks. */
+    year: integer(),
+    seasonOfYear: seasonOfYear(),
     /** Null while airing or unknown. */
     episodeCount: integer(),
     synopsis: text(),
@@ -339,7 +349,7 @@ export const seriesTag = pgTable(
       .references(() => series.id, { onDelete: 'cascade' }),
     tagId: uuid()
       .notNull()
-      .references(() => tag.id, { onDelete: 'restrict' }),
+      .references(() => tag.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.seriesId, t.tagId] }), index('series_tag_tag_id_idx').on(t.tagId)],
 );
@@ -352,7 +362,7 @@ export const seasonTag = pgTable(
       .references(() => season.id, { onDelete: 'cascade' }),
     tagId: uuid()
       .notNull()
-      .references(() => tag.id, { onDelete: 'restrict' }),
+      .references(() => tag.id, { onDelete: 'cascade' }),
   },
   (t) => [primaryKey({ columns: [t.seasonId, t.tagId] }), index('season_tag_tag_id_idx').on(t.tagId)],
 );
@@ -389,8 +399,7 @@ export const listEntry = pgTable(
     userId: uuid()
       .notNull()
       .references(() => user.id, { onDelete: 'cascade' }),
-    // RESTRICT for now: what deleting a season on members' lists should do is undecided,
-    // and this choice cannot lose data.
+    // A season on anyone's list cannot be deleted.
     seasonId: uuid()
       .notNull()
       .references(() => season.id, { onDelete: 'restrict' }),

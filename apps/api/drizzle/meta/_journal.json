@@ -22,6 +22,20 @@
       "when": 1793861121315,
       "tag": "0002_user_removal",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793861979038,
+      "tag": "0003_owner_decisions",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793861979611,
+      "tag": "0004_user_removal_invites",
+      "breakpoints": true
     }
   ]
 }
