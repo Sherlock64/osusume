@@ -1,0 +1,191 @@
+import { createRoute } from '@hono/zod-openapi';
+import {
+  accountSchema,
+  changeEmailSchema,
+  emailSentResponseSchema,
+  tokenBodySchema,
+} from '@osusume/shared';
+import { and, eq, gt, sql } from 'drizzle-orm';
+import { deleteCookie } from 'hono/cookie';
+import {
+  assertEmailUnused,
+  deletePasswordResetTokens,
+  firstAdminProtected,
+  removeUser,
+  toAccount,
+  verifyCurrentPassword,
+} from '../auth/accounts.ts';
+import { emailChangeMail } from '../auth/emails.ts';
+import { emailChangeRequest, inviteRequest, user } from '../db/schema.ts';
+import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { lockEmails } from '../lib/locks.ts';
+import { sendOrFail } from '../lib/mailer.ts';
+import {
+  conflict,
+  createRouter,
+  emailFailed,
+  invalidRequest,
+  notFound,
+  sessionSecurity,
+  unauthenticated,
+} from '../lib/router.ts';
+import { generateToken, hashToken } from '../lib/tokens.ts';
+import { requireSession } from '../middleware/auth.ts';
+
+const EMAIL_CHANGE_LINK_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+const tokenInvalid = () =>
+  new ApiError(404, 'token_invalid', 'This link is not valid or has expired.');
+
+const deleteAccountRoute = createRoute({
+  method: 'delete',
+  path: '/me',
+  summary: 'Delete your own account. Same effect as being removed',
+  security: sessionSecurity,
+  middleware: requireSession,
+  responses: {
+    204: { description: 'The account was deleted' },
+    ...unauthenticated,
+  },
+});
+
+const requestEmailChangeRoute = createRoute({
+  method: 'post',
+  path: '/me/email',
+  summary: 'Start changing your email: emails a verification link to the new address',
+  security: sessionSecurity,
+  middleware: requireSession,
+  request: {
+    body: { required: true, content: { 'application/json': { schema: changeEmailSchema } } },
+  },
+  responses: {
+    202: {
+      description: 'The link was sent; the email has not changed yet',
+      content: { 'application/json': { schema: emailSentResponseSchema } },
+    },
+    ...invalidRequest,
+    ...unauthenticated,
+    ...conflict,
+    ...emailFailed,
+  },
+});
+
+// No session needed: the link may be opened in another browser, and holding it proves
+// control of the new address.
+const verifyEmailChangeRoute = createRoute({
+  method: 'post',
+  path: '/me/email/verify',
+  summary: 'Use the emailed link: applies the email change',
+  request: {
+    body: { required: true, content: { 'application/json': { schema: tokenBodySchema } } },
+  },
+  responses: {
+    200: {
+      description: 'The email was changed',
+      content: { 'application/json': { schema: accountSchema } },
+    },
+    ...invalidRequest,
+    403: unauthenticated[403],
+    ...notFound,
+    ...conflict,
+  },
+});
+
+export const meRoutes = createRouter()
+  .openapi(deleteAccountRoute, async (c) => {
+    const { db, auth } = c.var.deps;
+    if (c.var.currentUser.isFirstAdmin) throw firstAdminProtected();
+    await removeUser(db, c.var.currentUser.id);
+    const { sessionToken } = (await auth.$context).authCookies;
+    // Secure must match: over HTTPS the name has the __Secure- prefix, which requires it.
+    deleteCookie(c, sessionToken.name, {
+      path: sessionToken.attributes.path ?? '/',
+      ...(sessionToken.attributes.secure === true ? { secure: true } : {}),
+    });
+    return c.body(null, 204);
+  })
+  .openapi(requestEmailChangeRoute, async (c) => {
+    const { db, auth, mailer, publicBaseUrl } = c.var.deps;
+    const { currentPassword, newEmail } = c.req.valid('json');
+    const userId = c.var.currentUser.id;
+
+    if (!(await verifyCurrentPassword({ db, auth }, userId, currentPassword))) {
+      throw new ApiError(403, 'invalid_password', 'The current password is not correct.');
+    }
+
+    const token = generateToken();
+    const values = {
+      newEmail,
+      tokenHash: hashToken(token),
+      expiresAt: new Date(Date.now() + EMAIL_CHANGE_LINK_LIFETIME_MS),
+    };
+    await db.transaction(async (tx) => {
+      await lockEmails(tx, newEmail);
+      await assertEmailUnused(tx, newEmail);
+      await tx
+        .insert(emailChangeRequest)
+        .values({ userId, ...values })
+        .onConflictDoUpdate({ target: emailChangeRequest.userId, set: values });
+      await sendOrFail(mailer, emailChangeMail(publicBaseUrl, newEmail, token));
+    });
+    return c.json({ status: 'email_sent' as const }, 202);
+  })
+  .openapi(verifyEmailChangeRoute, async (c) => {
+    const { db } = c.var.deps;
+    const tokenHash = hashToken(c.req.valid('json').token);
+
+    const [found] = await db
+      .select({ userId: emailChangeRequest.userId })
+      .from(emailChangeRequest)
+      .where(eq(emailChangeRequest.tokenHash, tokenHash));
+    if (!found) throw tokenInvalid();
+
+    try {
+      const updated = await db.transaction(async (tx) => {
+        const [current] = await tx
+          .select()
+          .from(user)
+          .where(eq(user.id, found.userId))
+          .for('update');
+        if (!current) throw tokenInvalid();
+        if (current.disabledAt) {
+          throw new ApiError(403, 'account_disabled', 'This account is disabled.');
+        }
+
+        const [request] = await tx
+          .select()
+          .from(emailChangeRequest)
+          .where(
+            and(
+              eq(emailChangeRequest.tokenHash, tokenHash),
+              gt(emailChangeRequest.expiresAt, new Date()),
+            ),
+          )
+          .for('update');
+        if (!request) throw tokenInvalid();
+
+        await lockEmails(tx, current.email, request.newEmail);
+        await assertEmailUnused(tx, request.newEmail);
+
+        const [row] = await tx
+          .update(user)
+          .set({ email: request.newEmail, emailVerified: true })
+          .where(eq(user.id, current.id))
+          .returning();
+        if (!row) throw tokenInvalid();
+        await tx.delete(emailChangeRequest).where(eq(emailChangeRequest.id, request.id));
+        // No old-address history is kept, and a reset link sent there must stop working.
+        await tx
+          .delete(inviteRequest)
+          .where(sql`lower(${inviteRequest.inviteeEmail}) = lower(${current.email})`);
+        await deletePasswordResetTokens(tx, current.id);
+        return row;
+      });
+      return c.json(toAccount(updated), 200);
+    } catch (error) {
+      if (isUniqueViolation(error, 'user_email_unique')) {
+        throw new ApiError(409, 'email_in_use', 'An account already uses this email address.');
+      }
+      throw error;
+    }
+  });

@@ -37,6 +37,25 @@ pnpm build
 Database tests create and drop their own scratch databases on the dev Postgres. Set
 `TEST_DATABASE_URL` to use a different server; its role must be able to create databases.
 
+Account tests send real email to Mailpit, each to an address made up for that test, and read it
+back through Mailpit's API. Set `TEST_SMTP_HOST`, `TEST_SMTP_PORT` and `TEST_MAILPIT_URL` to use
+a different one.
+
+## Accounts
+
+A fresh install has no accounts. Open the site's first-run setup page, or call
+`POST /api/v1/setup`; the emailed link creates the permanent first admin and closes setup for
+good. Everyone after that arrives by an approved invite. In development the emails are in
+Mailpit's UI on port 8025.
+
+Better Auth is mounted at `/api/auth`, exposing only what `exposedAuthEndpoints` in
+`apps/api/src/auth/auth.ts` lists. Its rate limiter keys on the client IP from `X-Forwarded-For`
+and trusts that header only when it holds a single value, so a proxy in front of the api must
+overwrite the header rather than append to it.
+
+Routes that need a login use `requireSession` or `requireAdmin` from
+`apps/api/src/middleware/auth.ts` as their `middleware`, then read `c.var.currentUser`.
+
 ## Database
 
 - Change `apps/api/src/db/schema.ts`, then run `pnpm db:generate` and commit the new

@@ -1,8 +1,10 @@
 import { serve } from '@hono/node-server';
 import { sql } from 'drizzle-orm';
 import { createApp } from './app.ts';
+import { createAuth } from './auth/auth.ts';
 import { EnvValidationError, loadEnv } from './config/env.ts';
 import { createDatabase } from './db/client.ts';
+import { createSmtpMailer } from './lib/mailer.ts';
 
 let env;
 try {
@@ -14,10 +16,22 @@ try {
 
 const { db, pool } = createDatabase(env.DATABASE_URL);
 
+const mailer = createSmtpMailer(env);
+const auth = createAuth({
+  db,
+  secret: env.AUTH_SECRET,
+  publicBaseUrl: env.PUBLIC_BASE_URL,
+  mailer,
+});
+
 const app = createApp({
   checkDatabase: async () => {
     await db.execute(sql`select 1`);
   },
+  db,
+  auth,
+  mailer,
+  publicBaseUrl: env.PUBLIC_BASE_URL,
 });
 
 const server = serve({ fetch: app.fetch, hostname: env.HOST, port: env.PORT }, (info) => {
