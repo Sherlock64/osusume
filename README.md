@@ -72,12 +72,21 @@ Writes that span rows take `lockCatalog` from `apps/api/src/lib/locks.ts`, befor
 
 ## Images
 
-Uploads are validated by content, resized with sharp and re-encoded as WebP, which drops metadata
-such as EXIF location. They are stored under `IMAGE_STORAGE_PATH` through the `ImageStorage`
-interface in `apps/api/src/lib/image-storage.ts`; the volume is the only backend. The upload limit
-and named sizes are set in `packages/shared/src/catalog.ts`, the accepted formats in
-`apps/api/src/lib/image-processing.ts`. An image's URL never changes content, so reads are cached
-privately for a week.
+Uploads are validated by content, resized with sharp and served as WebP. Everything kept is
+re-encoded, which drops metadata such as EXIF location, including the original, which is stored so
+sizes can be regenerated and is never served. Files live under `IMAGE_STORAGE_PATH` through the
+`ImageStorage` interface in `apps/api/src/lib/image-storage.ts`; the volume is the only backend.
+The upload limit and named sizes are set in `packages/shared/src/catalog.ts`, the accepted formats
+in `apps/api/src/lib/image-processing.ts`. An image's URL never changes content, so reads are
+cached privately for a week.
+
+An admin uploads with `POST /images`, then adds the result to a series with
+`POST /series/{id}/images`. The first image becomes the primary. Series and seasons return a
+resolved `cover`: the season's own choice, else the series primary, else null for a placeholder.
+
+Files are removed after the transaction commits, so a rollback never loses one. If removal fails,
+the api logs the storage key and still answers with success: the rows are gone, so nothing points
+at the leftover files, which stay on the volume until removed by hand.
 
 ## Database
 

@@ -283,15 +283,35 @@ export const friendship = pgTable(
 
 /* Catalog */
 
-export const image = pgTable('image', {
-  id: primaryId(),
-  storageKey: text().notNull().unique(),
-  mime: text().notNull(),
-  width: integer().notNull(),
-  height: integer().notNull(),
-  uploadedBy: uuid().references(() => user.id, { onDelete: 'set null' }),
-  createdAt: createdAt(),
-});
+/**
+ * An uploaded image. It joins one series' image catalog, and then cannot leave it except by being
+ * removed, which deletes it. Its rows go with the series; its files are removed by the api after
+ * the transaction commits, so a rollback never loses them.
+ */
+export const image = pgTable(
+  'image',
+  {
+    id: primaryId(),
+    storageKey: text().notNull().unique(),
+    mime: text().notNull(),
+    width: integer().notNull(),
+    height: integer().notNull(),
+    uploadedBy: uuid().references(() => user.id, { onDelete: 'set null' }),
+    /** The catalog this image is in; null between upload and being added. */
+    seriesId: uuid().references(() => series.id, { onDelete: 'cascade' }),
+    /** The series' cover, and the default for its seasons. */
+    isPrimary: boolean().notNull().default(false),
+    /** When it joined the catalog: the earliest remaining takes over from a removed primary. */
+    addedAt: timestampMs(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex('image_one_primary_per_series').on(t.seriesId).where(sql`${t.isPrimary}`),
+    index('image_series_id_added_at_idx').on(t.seriesId, t.addedAt),
+    check('image_catalog_fields_together', sql`(${t.seriesId} IS NULL) = (${t.addedAt} IS NULL)`),
+    check('image_primary_in_catalog', sql`NOT ${t.isPrimary} OR ${t.seriesId} IS NOT NULL`),
+  ],
+);
 
 /**
  * The text that search indexes cover: a row's title and alternate titles. The
@@ -319,7 +339,6 @@ export const series = pgTable(
     title: text().notNull(),
     altTitles: text().array().notNull().default(sql`'{}'::text[]`),
     synopsis: text(),
-    coverImageId: uuid().references(() => image.id, { onDelete: 'set null' }),
     source: text(),
     sourceId: text(),
     createdAt: createdAt(),
@@ -351,6 +370,10 @@ export const season = pgTable(
     /** Null while airing or unknown. */
     episodeCount: integer(),
     synopsis: text(),
+    /**
+     * An image from this series' catalog chosen for this season; null uses the series primary.
+     * The api enforces the same-series rule. Removing the image falls back to the primary.
+     */
     coverImageId: uuid().references(() => image.id, { onDelete: 'set null' }),
     source: text(),
     sourceId: text(),

@@ -43,6 +43,13 @@
       "when": 1793863924050,
       "tag": "0005_accounts",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793890303368,
+      "tag": "0006_series_image_catalog",
+      "breakpoints": true
     }
   ]
 }

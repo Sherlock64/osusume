@@ -155,9 +155,13 @@ describe('removing a user', () => {
     if (!cover) throw new Error('image was not created');
     const [entry] = await db
       .insert(series)
-      .values({ title: 'Kept', coverImageId: cover.id })
+      .values({ title: 'Kept' })
       .returning();
     if (!entry) throw new Error('series was not created');
+    await db
+      .update(image)
+      .set({ seriesId: entry.id, isPrimary: true, addedAt: new Date() })
+      .where(eq(image.id, cover.id));
     const [request] = await db
       .insert(catalogRequest)
       .values({
@@ -195,8 +199,7 @@ describe('removing a user', () => {
 
     const [keptImage] = await db.select().from(image).where(eq(image.id, cover.id));
     expect(keptImage?.uploadedBy).toBeNull();
-    const [keptSeries] = await db.select().from(series).where(eq(series.id, entry.id));
-    expect(keptSeries?.coverImageId).toBe(cover.id);
+    expect(keptImage).toMatchObject({ seriesId: entry.id, isPrimary: true });
     const [keptRequest] = await db.select().from(catalogRequest).where(eq(catalogRequest.id, request.id));
     expect(keptRequest?.reviewedBy).toBeNull();
     expect(keptRequest?.requesterId).toBe(requester.id);
@@ -484,7 +487,7 @@ describe('schema constraints', () => {
       coverImageId: null,
       altTitles: [],
     });
-    expect(parent).toMatchObject({ synopsis: null, coverImageId: null, altTitles: [] });
+    expect(parent).toMatchObject({ synopsis: null, altTitles: [] });
   });
 
   it('refuses to delete a season on a list or a series with seasons', async () => {

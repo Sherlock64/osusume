@@ -79,7 +79,7 @@ describe('uploading', () => {
     const [row] = await t.db.select().from(image).where(eq(image.id, body.id));
     expect(row?.uploadedBy).toBe(admin.id);
     const files = await readdir(join(t.imageDirectory, row?.storageKey ?? ''));
-    expect(files.sort()).toEqual(imageSizes.map((size) => `${size}.webp`).sort());
+    expect(files.sort()).toEqual([...imageSizes.map((size) => `${size}.webp`), 'original'].sort());
   });
 
   it('goes by the content, not the declared type or name', async () => {
@@ -150,6 +150,31 @@ describe('uploading', () => {
     expect(stored.includes('Private person')).toBe(false);
   });
 
+  it('keeps the original at full size in its format, with metadata stripped', async () => {
+    const big = await solid(2000, 1000)
+      .jpeg()
+      .withExif({ IFD0: { Copyright: 'Private person' }, IFD3: { GPSLatitudeRef: 'N', GPSLatitude: '1/1 2/1 3/1' } })
+      .toBuffer();
+    expect((await sharp(big).metadata()).exif).toBeDefined();
+    const { id } = await uploaded(big);
+    const [row] = await t.db.select().from(image).where(eq(image.id, id));
+    const original = (await t.imageStorage.get(`${row?.storageKey ?? ''}/original`)) ?? new Uint8Array();
+    const metadata = await sharp(original).metadata();
+    expect(metadata).toMatchObject({ format: 'jpeg', width: 2000, height: 1000 });
+    expect(metadata.exif).toBeUndefined();
+    expect(Buffer.from(original).includes('Private person')).toBe(false);
+  });
+
+  it.each([
+    ['PNG', 'png', () => solid(30, 30).png().toBuffer()],
+    ['WebP', 'webp', () => solid(30, 30).webp().toBuffer()],
+  ])('keeps a %s original in its format', async (_label, format, make) => {
+    const { id } = await uploaded(await make());
+    const [row] = await t.db.select().from(image).where(eq(image.id, id));
+    const original = (await t.imageStorage.get(`${row?.storageKey ?? ''}/original`)) ?? new Uint8Array();
+    expect((await sharp(original).metadata()).format).toBe(format);
+  });
+
   it('applies EXIF orientation before storing', async () => {
     const rotated = await solid(40, 20).jpeg().withMetadata({ orientation: 6 }).toBuffer();
     expect(await uploaded(rotated)).toMatchObject({ width: 20, height: 40 });
@@ -205,9 +230,17 @@ describe('reading', () => {
     expect(await second.text()).toBe('');
   });
 
+  it('never serves the original', async () => {
+    const { id } = await uploaded();
+    const response = await fetchImage(id, 'original');
+    expect(response.status).toBe(400);
+    const asAdmin = await fetchImage(id, 'original', {}, admin.cookie);
+    expect(asAdmin.status).toBe(400);
+  });
+
   it('refuses an unknown size, a missing image and a malformed id', async () => {
     const { id } = await uploaded();
-    expect((await fetchImage(id, 'original')).status).toBe(400);
+    expect((await fetchImage(id, 'huge')).status).toBe(400);
     expect((await fetchImage(NO_ID, 'small')).status).toBe(404);
     expect((await fetchImage('../../etc', 'small')).status).toBe(404);
     expect((await fetchImage('not-a-uuid', 'small')).status).toBe(400);
@@ -226,23 +259,7 @@ describe('reading', () => {
   });
 });
 
-describe('use as a cover', () => {
-  it('can be set on a series and a season, and cleared', async () => {
-    const { id } = await uploaded();
-    const series = await t.request('POST', '/api/v1/series', { title: 'Covered', coverImageId: id }, { cookie: admin.cookie });
-    expect(series.body).toMatchObject({ coverImageId: id });
-    const seriesId = (series.body as { id: string }).id;
-    const season = await t.request(
-      'POST',
-      '/api/v1/seasons',
-      { seriesId, ordinal: 1, title: 'One', coverImageId: id },
-      { cookie: admin.cookie },
-    );
-    expect(season.body).toMatchObject({ coverImageId: id });
-    const cleared = await t.request('PATCH', `/api/v1/series/${seriesId}`, { coverImageId: null }, { cookie: admin.cookie });
-    expect(cleared.body).toMatchObject({ coverImageId: null });
-  });
-
+describe('the uploader', () => {
   it('stays when the uploader is removed, with their identity blanked', async () => {
     const leaving = await t.seedLoggedIn({ role: 'admin' });
     const response = await t.upload(png, { cookie: leaving.cookie });

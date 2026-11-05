@@ -15,6 +15,8 @@ export interface ProcessedImage {
   width: number;
   height: number;
   variants: Record<ImageSize, Uint8Array>;
+  /** Full size in the uploaded format, with metadata stripped. Never served to users. */
+  original: Uint8Array;
 }
 
 const unsupportedFormat = () =>
@@ -41,8 +43,8 @@ function sniffFormat(bytes: Uint8Array): 'jpeg' | 'png' | 'webp' | null {
 /**
  * Validates an upload by its content, ignoring the name and type it was declared with, and
  * resizes it. Only recognized bytes reach the decoder, so an SVG or anything else it could
- * parse never does. Output is re-encoded, which drops metadata such as EXIF location; orientation
- * is applied first. An animated image keeps its first frame.
+ * parse never does. Everything kept is re-encoded, including the original, which drops metadata
+ * such as EXIF location; orientation is applied first. An animated image keeps its first frame.
  */
 export async function processImage(bytes: Uint8Array): Promise<ProcessedImage> {
   const format = sniffFormat(bytes);
@@ -66,12 +68,23 @@ export async function processImage(bytes: Uint8Array): Promise<ProcessedImage> {
         .webp({ quality: WEBP_QUALITY })
         .toBuffer({ resolveWithObject: true });
 
-    const [small, medium, large] = await Promise.all(imageSizes.map(encode));
+    const upright = source.clone().rotate();
+    const originalEncoding = {
+      jpeg: () => upright.jpeg({ quality: 95, chromaSubsampling: '4:4:4' }),
+      png: () => upright.png(),
+      webp: () => upright.webp({ quality: 95 }),
+    }[format];
+
+    const [[small, medium, large], original] = await Promise.all([
+      Promise.all(imageSizes.map(encode)),
+      originalEncoding().toBuffer(),
+    ]);
     if (!small || !medium || !large) throw new Error('A size was not produced');
     return {
       width: large.info.width,
       height: large.info.height,
       variants: { small: small.data, medium: medium.data, large: large.data },
+      original,
     };
   } catch (error) {
     if (error instanceof ApiError) throw error;

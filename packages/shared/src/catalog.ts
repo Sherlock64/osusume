@@ -41,7 +41,6 @@ const seriesFields = {
   title: titleSchema,
   altTitles: altTitlesSchema.optional(),
   synopsis: synopsisSchema.nullable().optional(),
-  coverImageId: z.uuid().nullable().optional(),
   /** From the tag vocabulary. On a PATCH, replaces the series' tags. */
   tagIds: tagIdsSchema.optional(),
 };
@@ -55,6 +54,7 @@ const seasonFields = {
   /** Null while airing or unknown. */
   episodeCount: episodeCountSchema.nullable().optional(),
   synopsis: synopsisSchema.nullable().optional(),
+  /** An image from this series' catalog for this season. Null uses the series primary. */
   coverImageId: z.uuid().nullable().optional(),
   /** The season's own extra tags, from the tag vocabulary. On a PATCH, replaces them. */
   tagIds: tagIdsSchema.optional(),
@@ -87,7 +87,10 @@ export type UpdateSeries = z.infer<typeof updateSeriesSchema>;
 export const createSeasonSchema = z.object({ seriesId: z.uuid(), ...seasonFields });
 export type CreateSeason = z.infer<typeof createSeasonSchema>;
 
-/** Sending another `seriesId` moves the season, which clears a cover from the old catalog. */
+/**
+ * Sending another `seriesId` moves the season, which clears its own cover from the old catalog.
+ * A `coverImageId` sent with it must be from the new series' catalog.
+ */
 export const updateSeasonSchema = z
   .object({ seriesId: z.uuid(), ...seasonFields })
   .partial()
@@ -103,6 +106,17 @@ export const seriesListQuerySchema = paginationQuerySchema.extend({
 export type SeriesListQuery = z.infer<typeof seriesListQuerySchema>;
 
 /**
+ * The image to show, already resolved: fetch it from /images/{id}/{size}. Null means there are
+ * no images, so show a placeholder.
+ */
+export const coverSchema = z.object({
+  id: z.uuid(),
+  width: z.number().int(),
+  height: z.number().int(),
+});
+export type Cover = z.infer<typeof coverSchema>;
+
+/**
  * A series in a list. A series has no date of its own: `firstYear` and `firstSeasonOfYear` come
  * from its earliest dated season, and are null when no season has a year.
  */
@@ -111,7 +125,8 @@ export const seriesSummarySchema = z.object({
   title: z.string(),
   altTitles: z.array(z.string()),
   synopsis: z.string().nullable(),
-  coverImageId: z.uuid().nullable(),
+  /** The primary image of its catalog. */
+  cover: coverSchema.nullable(),
   tags: z.array(tagSchema),
   seasonCount: z.number().int(),
   firstYear: z.number().int().nullable(),
@@ -131,7 +146,10 @@ export const seasonSchema = z.object({
   seasonOfYear: seasonOfYearSchema.nullable(),
   episodeCount: z.number().int().nullable(),
   synopsis: z.string().nullable(),
+  /** The image chosen for this season, for editing. Null uses the series primary. */
   coverImageId: z.uuid().nullable(),
+  /** What to display: the chosen image, or the series primary. */
+  cover: coverSchema.nullable(),
   /** The season's own extra tags, for editing. */
   ownTags: z.array(tagSchema),
   /** What to display: the union of the series' tags and the season's own. */
@@ -159,7 +177,7 @@ const suggestedTagsSchema = z.array(tagNameSchema).max(SUGGESTED_TAGS_MAX);
  * Proposals carry no cover, the member's or the admin's edit: a new series has no image catalog
  * until it exists, so admins add images after approval.
  */
-const proposedSeriesSchema = z.object(seriesFields).omit({ coverImageId: true });
+const proposedSeriesSchema = z.object(seriesFields);
 const proposedSeasonSchema = z.object(seasonFields).omit({ coverImageId: true });
 
 const proposedSeasonsSchema = z
@@ -238,10 +256,7 @@ export const catalogRequestDecisionSchema = z.discriminatedUnion('decision', [
 ]);
 export type CatalogRequestDecision = z.infer<typeof catalogRequestDecisionSchema>;
 
-/*
- * Images. The upload limit, accepted formats and named sizes are provisional, awaiting the
- * owner's decision; this is the one place they are set.
- */
+/* Images */
 
 export const MAX_IMAGE_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -262,3 +277,19 @@ export const imageSchema = z.object({
   createdAt: timestampSchema,
 });
 export type Image = z.infer<typeof imageSchema>;
+
+/* A series' image catalog */
+
+export const seriesImageListQuerySchema = paginationQuerySchema;
+
+export const seriesImageParamSchema = z.object({ id: z.uuid(), imageId: z.uuid() });
+
+/** An uploaded image to add to the catalog. An image can only ever be in one catalog. */
+export const addSeriesImageSchema = z.object({ imageId: z.uuid() });
+export type AddSeriesImage = z.infer<typeof addSeriesImageSchema>;
+
+export const seriesImageSchema = imageSchema.extend({
+  isPrimary: z.boolean(),
+  addedAt: timestampSchema,
+});
+export type SeriesImage = z.infer<typeof seriesImageSchema>;

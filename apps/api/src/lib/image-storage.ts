@@ -49,3 +49,22 @@ export function createVolumeImageStorage(root: string): ImageStorage {
     },
   };
 }
+
+/**
+ * Removes the files of images whose rows are gone, so call it after the transaction commits: a
+ * rollback then never loses a file. A failure is logged and otherwise ignored. Nothing refers to
+ * those files any more, so they are unreachable leftovers that only take up space until someone
+ * removes them by the logged key.
+ */
+export async function removeImageFiles(
+  storage: ImageStorage,
+  keys: readonly string[],
+): Promise<void> {
+  for (const key of keys) {
+    try {
+      await storage.remove(key);
+    } catch (error) {
+      console.error(`Could not remove the image files under ${key}:`, error);
+    }
+  }
+}

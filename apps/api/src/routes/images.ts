@@ -50,11 +50,13 @@ const uploadSizeLimit = createMiddleware<AppEnv>(async (c, next) => {
 });
 
 const variantKey = (storageKey: string, size: ImageSize) => `${storageKey}/${size}.webp`;
+// Kept so sizes can be regenerated. No route reads this key.
+const originalKey = (storageKey: string) => `${storageKey}/original`;
 
 const uploadRoute = createRoute({
   method: 'post',
   path: '/images',
-  summary: 'Upload a cover image. Its content decides whether it is accepted, not its declared type',
+  summary: 'Upload an image, ready to add to a series catalog. Its content decides whether it is accepted',
   security: sessionSecurity,
   middleware: [requireAdmin, uploadSizeLimit] as const,
   request: {
@@ -71,7 +73,7 @@ const uploadRoute = createRoute({
   },
   responses: {
     201: {
-      description: 'The stored image, available in every named size',
+      description: 'The stored image, available in every named size. Add it to a catalog next',
       content: { 'application/json': { schema: imageSchema } },
     },
     ...invalidRequest,
@@ -121,6 +123,7 @@ export const imageRoutes = createRouter()
       for (const size of imageSizes) {
         await imageStorage.put(variantKey(storageKey, size), processed.variants[size]);
       }
+      await imageStorage.put(originalKey(storageKey), processed.original);
       const [row] = await db
         .insert(image)
         .values({

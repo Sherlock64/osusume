@@ -1,4 +1,4 @@
-import type { SeasonOfYear, Tag } from '@osusume/shared';
+import type { Cover, SeasonOfYear, Tag } from '@osusume/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database, Transaction } from '../db/client.ts';
 import { image, season, seasonTag, series, seriesTag, tag } from '../db/schema.ts';
@@ -59,13 +59,26 @@ export async function findOrCreateTag(tx: Transaction, name: string): Promise<st
   return row.id;
 }
 
-/** Refuses a cover that is not an uploaded image. */
-export async function assertImagesExist(tx: Transaction, ids: readonly string[]): Promise<void> {
-  const wanted = [...new Set(ids)];
-  if (wanted.length === 0) return;
-  const found = await tx.select({ id: image.id }).from(image).where(inArray(image.id, wanted));
-  if (found.length !== wanted.length) {
-    throw new ApiError(400, 'unknown_image', 'A chosen cover image does not exist.');
+/** Holds a series against writes for the transaction. Refuses a missing one. */
+export async function lockSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
+  const [row] = await tx.select().from(series).where(eq(series.id, id)).for('update');
+  if (!row) throw seriesNotFound();
+  return row;
+}
+
+/** Refuses a season cover that is not in its own series' catalog. Null is always allowed. */
+export async function assertSeasonCover(
+  tx: Transaction,
+  seriesId: string,
+  imageId: string | null | undefined,
+): Promise<void> {
+  if (imageId === null || imageId === undefined) return;
+  const [found] = await tx
+    .select({ id: image.id })
+    .from(image)
+    .where(and(eq(image.id, imageId), eq(image.seriesId, seriesId)));
+  if (!found) {
+    throw new ApiError(400, 'image_not_in_series', "A season's cover must be from its series' catalog.");
   }
 }
 
@@ -89,7 +102,6 @@ export interface SeriesEntry {
   title: string;
   altTitles?: string[] | undefined;
   synopsis?: string | null | undefined;
-  coverImageId?: string | null | undefined;
   tagIds?: string[] | undefined;
 }
 
@@ -105,7 +117,7 @@ export interface SeasonEntry {
   tagIds?: string[] | undefined;
 }
 
-/** Inserts a series and its tags. Check the tags and cover first. */
+/** Inserts a series and its tags. Check the tags first. */
 export async function insertSeries(tx: Transaction, entry: SeriesEntry): Promise<string> {
   const [row] = await tx
     .insert(series)
@@ -113,7 +125,6 @@ export async function insertSeries(tx: Transaction, entry: SeriesEntry): Promise
       title: entry.title,
       altTitles: entry.altTitles ?? [],
       synopsis: entry.synopsis ?? null,
-      coverImageId: entry.coverImageId ?? null,
     })
     .returning({ id: series.id });
   if (!row) throw new Error('series was not created');
@@ -231,6 +242,30 @@ export const seriesDateKey = () => {
   return sql<number>`coalesce(${earliest}, 0)`;
 };
 
+const coverColumns = { id: image.id, width: image.width, height: image.height };
+
+/** Each series' primary image. */
+async function primaryCovers(db: Reader, seriesIds: readonly string[]) {
+  if (seriesIds.length === 0) return new Map<string, Cover>();
+  const rows = await db
+    .select({ seriesId: image.seriesId, ...coverColumns })
+    .from(image)
+    .where(and(inArray(image.seriesId, [...seriesIds]), eq(image.isPrimary, true)));
+  const covers = new Map<string, Cover>();
+  for (const { seriesId, ...cover } of rows) {
+    if (seriesId !== null) covers.set(seriesId, cover);
+  }
+  return covers;
+}
+
+/** The images seasons chose for themselves, by id. */
+async function chosenCovers(db: Reader, imageIds: readonly (string | null)[]) {
+  const ids = [...new Set(imageIds.filter((id) => id !== null))];
+  if (ids.length === 0) return new Map<string, Cover>();
+  const rows = await db.select(coverColumns).from(image).where(inArray(image.id, ids));
+  return new Map(rows.map((cover) => [cover.id, cover]));
+}
+
 type SeriesRow = typeof series.$inferSelect;
 type SeasonRow = typeof season.$inferSelect;
 
@@ -239,6 +274,7 @@ export async function toSeriesSummaries(db: Reader, rows: readonly SeriesRow[]) 
   const ids = rows.map((row) => row.id);
   const tags = await tagsOfSeries(db, ids);
   const dates = await datesOfSeries(db, ids);
+  const covers = await primaryCovers(db, ids);
   return rows.map((row) => {
     const date = dates.get(row.id);
     return {
@@ -246,7 +282,7 @@ export async function toSeriesSummaries(db: Reader, rows: readonly SeriesRow[]) 
       title: row.title,
       altTitles: row.altTitles,
       synopsis: row.synopsis,
-      coverImageId: row.coverImageId,
+      cover: covers.get(row.id) ?? null,
       tags: tags.get(row.id) ?? [],
       seasonCount: date?.seasonCount ?? 0,
       firstYear: date?.firstYear ?? null,
@@ -257,7 +293,12 @@ export async function toSeriesSummaries(db: Reader, rows: readonly SeriesRow[]) 
   });
 }
 
-function toSeason(row: SeasonRow, seriesTags: readonly Tag[], ownTags: readonly Tag[]) {
+function toSeason(
+  row: SeasonRow,
+  seriesTags: readonly Tag[],
+  ownTags: readonly Tag[],
+  cover: Cover | null,
+) {
   return {
     id: row.id,
     seriesId: row.seriesId,
@@ -269,6 +310,7 @@ function toSeason(row: SeasonRow, seriesTags: readonly Tag[], ownTags: readonly 
     episodeCount: row.episodeCount,
     synopsis: row.synopsis,
     coverImageId: row.coverImageId,
+    cover,
     ownTags: [...ownTags],
     effectiveTags: unionOfTags(seriesTags, ownTags),
     createdAt: row.createdAt.toISOString(),
@@ -287,9 +329,13 @@ export async function loadSeriesDetail(db: Reader, id: string) {
     .where(eq(season.seriesId, id))
     .orderBy(asc(season.ordinal));
   const ownTags = await tagsOfSeasons(db, seasons.map((entry) => entry.id));
+  const chosen = await chosenCovers(db, seasons.map((entry) => entry.coverImageId));
   return {
     ...summary,
-    seasons: seasons.map((entry) => toSeason(entry, summary.tags, ownTags.get(entry.id) ?? [])),
+    seasons: seasons.map((entry) => {
+      const own = entry.coverImageId === null ? undefined : chosen.get(entry.coverImageId);
+      return toSeason(entry, summary.tags, ownTags.get(entry.id) ?? [], own ?? summary.cover);
+    }),
   };
 }
 
@@ -302,8 +348,16 @@ export async function loadSeasonDetail(db: Reader, id: string) {
   if (!found) throw seasonNotFound();
   const seriesTags = await tagsOfSeries(db, [found.season.seriesId]);
   const ownTags = await tagsOfSeasons(db, [id]);
+  const primary = await primaryCovers(db, [found.season.seriesId]);
+  const chosen = await chosenCovers(db, [found.season.coverImageId]);
+  const own = found.season.coverImageId === null ? undefined : chosen.get(found.season.coverImageId);
   return {
-    ...toSeason(found.season, seriesTags.get(found.season.seriesId) ?? [], ownTags.get(id) ?? []),
+    ...toSeason(
+      found.season,
+      seriesTags.get(found.season.seriesId) ?? [],
+      ownTags.get(id) ?? [],
+      own ?? primary.get(found.season.seriesId) ?? null,
+    ),
     series: { id: found.season.seriesId, title: found.seriesTitle },
   };
 }

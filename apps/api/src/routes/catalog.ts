@@ -18,26 +18,26 @@ import {
 } from '@osusume/shared';
 import { and, eq, getTableColumns, sql } from 'drizzle-orm';
 import {
-  assertImagesExist,
+  assertSeasonCover,
   assertTagsExist,
   insertSeason,
   insertSeries,
   loadSeasonDetail,
   loadSeriesDetail,
+  lockSeries,
   refusingTakenOrdinal,
   seasonNotFound,
   seriesDateKey,
-  seriesNotFound,
   setSeasonTags,
   setSeriesTags,
   toSeriesSummaries,
 } from '../catalog/entries.ts';
 import { withoutTag } from '../catalog/proposals.ts';
 import { seriesMatchingSearch, seriesRelevance } from '../catalog/search.ts';
-import type { Transaction } from '../db/client.ts';
-import { catalogRequest, season, seasonTag, series, seriesTag, tag } from '../db/schema.ts';
+import { catalogRequest, image, season, seasonTag, series, seriesTag, tag } from '../db/schema.ts';
 import { ApiError, isForeignKeyViolation, isUniqueViolation } from '../lib/errors.ts';
 import { revalidatedRead } from '../lib/http-cache.ts';
+import { removeImageFiles } from '../lib/image-storage.ts';
 import { lockCatalog } from '../lib/locks.ts';
 import { type SortTerm, decodeCursor, keysetBy, toPage } from '../lib/pagination.ts';
 import {
@@ -63,12 +63,6 @@ async function refusingTakenTagName<Result>(run: () => Promise<Result>): Promise
     if (isUniqueViolation(error, 'tag_name_lower_unique')) throw tagNameTaken();
     throw error;
   }
-}
-
-async function lockSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
-  const [row] = await tx.select().from(series).where(eq(series.id, id)).for('update');
-  if (!row) throw seriesNotFound();
-  return row;
 }
 
 const seriesContent = { 'application/json': { schema: seriesDetailSchema } };
@@ -372,7 +366,6 @@ export const catalogRoutes = createRouter()
     const created = await db.transaction(async (tx) => {
       await lockCatalog(tx);
       await assertTagsExist(tx, body.tagIds ?? []);
-      await assertImagesExist(tx, body.coverImageId ? [body.coverImageId] : []);
       return loadSeriesDetail(tx, await insertSeries(tx, body));
     });
     return c.json(created, 201);
@@ -385,7 +378,6 @@ export const catalogRoutes = createRouter()
       await lockCatalog(tx);
       await lockSeries(tx, id);
       await assertTagsExist(tx, tagIds ?? []);
-      await assertImagesExist(tx, fields.coverImageId ? [fields.coverImageId] : []);
       await tx
         .update(series)
         .set({ ...fields, updatedAt: new Date() })
@@ -396,11 +388,12 @@ export const catalogRoutes = createRouter()
     return c.json(updated, 200);
   })
   .openapi(deleteSeriesRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, imageStorage } = c.var.deps;
     const { id } = c.req.valid('param');
     const adminId = c.var.currentUser.id;
+    let storageKeys: string[];
     try {
-      await db.transaction(async (tx) => {
+      storageKeys = await db.transaction(async (tx) => {
         await lockCatalog(tx);
         const row = await lockSeries(tx, id);
         await tx
@@ -417,7 +410,13 @@ export const catalogRoutes = createRouter()
               eq(catalogRequest.status, 'pending'),
             ),
           );
+        // The catalog's rows go with the series, by the foreign key.
+        const catalog = await tx
+          .select({ storageKey: image.storageKey })
+          .from(image)
+          .where(eq(image.seriesId, id));
         await tx.delete(series).where(eq(series.id, id));
+        return catalog.map((entry) => entry.storageKey);
       });
     } catch (error) {
       if (isForeignKeyViolation(error, 'season_series_id_series_id_fk')) {
@@ -429,6 +428,7 @@ export const catalogRoutes = createRouter()
       }
       throw error;
     }
+    await removeImageFiles(imageStorage, storageKeys);
     return c.body(null, 204);
   })
   .openapi(createSeasonRoute, async (c) => {
@@ -439,7 +439,7 @@ export const catalogRoutes = createRouter()
         await lockCatalog(tx);
         await lockSeries(tx, seriesId);
         await assertTagsExist(tx, entry.tagIds ?? []);
-        await assertImagesExist(tx, entry.coverImageId ? [entry.coverImageId] : []);
+        await assertSeasonCover(tx, seriesId, entry.coverImageId);
         return loadSeasonDetail(tx, await insertSeason(tx, seriesId, entry));
       }),
     );
@@ -457,9 +457,10 @@ export const catalogRoutes = createRouter()
         const moving = seriesId !== undefined && seriesId !== row.seriesId;
         if (moving) await lockSeries(tx, seriesId);
         await assertTagsExist(tx, tagIds ?? []);
-        await assertImagesExist(tx, fields.coverImageId ? [fields.coverImageId] : []);
+        await assertSeasonCover(tx, moving ? seriesId : row.seriesId, fields.coverImageId);
         // List entries point at the season, so they follow it. A taken ordinal in the new series
-        // breaks the unique constraint, which refusingTakenOrdinal reports.
+        // breaks the unique constraint, which refusingTakenOrdinal reports. A cover from the old
+        // catalog cannot stay.
         await tx
           .update(season)
           .set({

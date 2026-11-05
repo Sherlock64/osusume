@@ -141,7 +141,7 @@ describe('series', () => {
       title: 'Mushishi',
       altTitles: [],
       synopsis: null,
-      coverImageId: null,
+      cover: null,
       tags: [],
       seasonCount: 0,
       firstYear: null,
@@ -158,13 +158,8 @@ describe('series', () => {
     expectError(await asAdmin('POST', '/series', body), 400, 'validation_error');
   });
 
-  it('refuses a tag outside the vocabulary and a cover that does not exist', async () => {
+  it('refuses a tag outside the vocabulary', async () => {
     expectError(await asAdmin('POST', '/series', { title: 'x', tagIds: [NO_ID] }), 400, 'unknown_tag');
-    expectError(
-      await asAdmin('POST', '/series', { title: 'x', coverImageId: NO_ID }),
-      400,
-      'unknown_image',
-    );
   });
 
   it('edits only what is sent; null clears and tags are replaced', async () => {
