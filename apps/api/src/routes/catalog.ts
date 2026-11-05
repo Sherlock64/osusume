@@ -211,7 +211,7 @@ const createSeasonRoute = createRoute({
 const updateSeasonRoute = createRoute({
   method: 'patch',
   path: '/seasons/{id}',
-  summary: 'Edit a season. Sent tags replace its own tags',
+  summary: 'Edit a season or move it to another series. Sent tags replace its own tags',
   security: sessionSecurity,
   middleware: requireAdmin,
   request: { params: idParamSchema, body: jsonBody(updateSeasonSchema) },
@@ -448,21 +448,25 @@ export const catalogRoutes = createRouter()
   .openapi(updateSeasonRoute, async (c) => {
     const { db } = c.var.deps;
     const { id } = c.req.valid('param');
-    const { tagIds, ...fields } = c.req.valid('json');
+    const { tagIds, seriesId, ...fields } = c.req.valid('json');
     const updated = await refusingTakenOrdinal(() =>
       db.transaction(async (tx) => {
         await lockCatalog(tx);
-        const [row] = await tx
-          .select({ id: season.id })
-          .from(season)
-          .where(eq(season.id, id))
-          .for('update');
+        const [row] = await tx.select().from(season).where(eq(season.id, id)).for('update');
         if (!row) throw seasonNotFound();
+        const moving = seriesId !== undefined && seriesId !== row.seriesId;
+        if (moving) await lockSeries(tx, seriesId);
         await assertTagsExist(tx, tagIds ?? []);
         await assertImagesExist(tx, fields.coverImageId ? [fields.coverImageId] : []);
+        // List entries point at the season, so they follow it. A taken ordinal in the new series
+        // breaks the unique constraint, which refusingTakenOrdinal reports.
         await tx
           .update(season)
-          .set({ ...fields, updatedAt: new Date() })
+          .set({
+            ...fields,
+            ...(moving ? { seriesId, coverImageId: fields.coverImageId ?? null } : {}),
+            updatedAt: new Date(),
+          })
           .where(eq(season.id, id));
         if (tagIds !== undefined) await setSeasonTags(tx, id, tagIds);
         return loadSeasonDetail(tx, id);

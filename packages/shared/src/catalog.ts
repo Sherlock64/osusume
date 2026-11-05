@@ -17,7 +17,7 @@ export const SEASONS_PER_REQUEST_MAX = 100;
 export const DECISION_NOTE_MAX_LENGTH = 2000;
 export const SEARCH_QUERY_MAX_LENGTH = 200;
 export const YEAR_MIN = 1900;
-export const YEAR_MAX = 2100;
+export const YEAR_MAX = 2999;
 export const EPISODE_COUNT_MAX = 100_000;
 export const ORDINAL_MAX = 100_000;
 
@@ -87,7 +87,11 @@ export type UpdateSeries = z.infer<typeof updateSeriesSchema>;
 export const createSeasonSchema = z.object({ seriesId: z.uuid(), ...seasonFields });
 export type CreateSeason = z.infer<typeof createSeasonSchema>;
 
-export const updateSeasonSchema = z.object(seasonFields).partial().refine(atLeastOneField, NO_FIELDS);
+/** Sending another `seriesId` moves the season, which clears a cover from the old catalog. */
+export const updateSeasonSchema = z
+  .object({ seriesId: z.uuid(), ...seasonFields })
+  .partial()
+  .refine(atLeastOneField, NO_FIELDS);
 export type UpdateSeason = z.infer<typeof updateSeasonSchema>;
 
 export const seriesListQuerySchema = paginationQuerySchema.extend({
@@ -148,14 +152,18 @@ export type SeasonDetail = z.infer<typeof seasonDetailSchema>;
 
 /* Catalog requests */
 
-/** Names a member proposes for the vocabulary. Kept for the admin to read. */
+/** Names a member proposes for the vocabulary. An admin may accept each one at review. */
 const suggestedTagsSchema = z.array(tagNameSchema).max(SUGGESTED_TAGS_MAX);
 
-const proposedSeasonSchema = z.object(seasonFields);
+/*
+ * Proposals carry no cover, the member's or the admin's edit: a new series has no image catalog
+ * until it exists, so admins add images after approval.
+ */
+const proposedSeriesSchema = z.object(seriesFields).omit({ coverImageId: true });
+const proposedSeasonSchema = z.object(seasonFields).omit({ coverImageId: true });
 
 const proposedSeasonsSchema = z
   .array(proposedSeasonSchema)
-  .min(1)
   .max(SEASONS_PER_REQUEST_MAX)
   .refine(
     (seasons) => new Set(seasons.map((season) => season.ordinal)).size === seasons.length,
@@ -166,8 +174,9 @@ const proposedSeasonsSchema = z
 export const catalogProposalSchema = z.discriminatedUnion('kind', [
   z.object({
     kind: z.literal('new_series'),
-    series: z.object(seriesFields),
-    seasons: proposedSeasonsSchema,
+    series: proposedSeriesSchema,
+    /** Optional: a series can be approved with no seasons yet. */
+    seasons: proposedSeasonsSchema.optional(),
     suggestedTags: suggestedTagsSchema.optional(),
   }),
   z.object({
@@ -211,12 +220,20 @@ export type AdminCatalogRequest = z.infer<typeof adminCatalogRequestSchema>;
 export const catalogRequestDecisionSchema = z.discriminatedUnion('decision', [
   z.object({
     decision: z.literal('approve'),
-    /** The edited entry, of the same kind as the request. Left out, the request is used as filed. */
+    /**
+     * The edited entry, of the same kind and for the same series as the request. Left out, the
+     * request is used as filed.
+     */
     proposal: catalogProposalSchema.optional(),
+    /**
+     * Names from the request's suggestions to accept. Each creates the tag, or uses the existing
+     * one matching ignoring case, and attaches it: to a new series, or to an added season.
+     */
+    acceptSuggestedTags: z.array(tagNameSchema).max(SUGGESTED_TAGS_MAX).optional(),
   }),
   z.object({
     decision: z.literal('reject'),
-    decisionNote: z.string().trim().min(1).max(DECISION_NOTE_MAX_LENGTH),
+    decisionNote: z.string().trim().min(1).max(DECISION_NOTE_MAX_LENGTH).optional(),
   }),
 ]);
 export type CatalogRequestDecision = z.infer<typeof catalogRequestDecisionSchema>;

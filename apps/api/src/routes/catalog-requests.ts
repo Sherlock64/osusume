@@ -13,6 +13,7 @@ import { and, eq } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
 import { refusingTakenOrdinal } from '../catalog/entries.ts';
 import {
+  acceptSuggestions,
   applyProposal,
   assertProposalApplies,
   withUniqueSuggestions,
@@ -145,7 +146,7 @@ const adminListRoute = createRoute({
 const decisionRoute = createRoute({
   method: 'post',
   path: '/admin/catalog-requests/{id}/decision',
-  summary: 'Approve a pending request as filed or edited, creating its rows, or reject it with a note',
+  summary: 'Approve a pending request as filed or edited, creating its rows, or reject it',
   security: sessionSecurity,
   middleware: requireAdmin,
   request: {
@@ -262,20 +263,39 @@ export const catalogRequestRoutes = createRouter()
         if (body.decision === 'reject') {
           await tx
             .update(catalogRequest)
-            .set({ status: 'rejected', reviewedBy: adminId, decisionNote: body.decisionNote })
+            .set({
+              status: 'rejected',
+              reviewedBy: adminId,
+              decisionNote: body.decisionNote ?? null,
+            })
             .where(eq(catalogRequest.id, id));
           return loadAdminRequest(tx, id);
         }
 
-        const proposal = withUniqueSuggestions(
-          body.proposal ?? catalogProposalSchema.parse(row.payload),
-        );
-        if (proposal.kind !== row.kind) {
+        const filed = catalogProposalSchema.parse(row.payload);
+        const edited = withUniqueSuggestions(body.proposal ?? filed);
+        if (edited.kind !== filed.kind) {
           throw new ApiError(
             400,
             'proposal_kind_mismatch',
             'An edited entry must be of the same kind as the request.',
           );
+        }
+        if (
+          edited.kind === 'add_season' &&
+          filed.kind === 'add_season' &&
+          edited.seriesId !== filed.seriesId
+        ) {
+          throw new ApiError(
+            400,
+            'proposal_series_mismatch',
+            'A request cannot be moved to another series. Reject it instead.',
+          );
+        }
+        const proposal = await acceptSuggestions(tx, filed, edited, body.acceptSuggestedTags ?? []);
+        // Accepted tags can push an entry past a limit the edit alone was within.
+        if (!catalogProposalSchema.safeParse(proposal).success) {
+          throw new ApiError(400, 'too_many_tags', 'This entry would have too many tags.');
         }
         await assertProposalApplies(tx, proposal);
         const seriesId = await applyProposal(tx, proposal);

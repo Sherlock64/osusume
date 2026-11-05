@@ -37,6 +37,17 @@ describe('editable fields', () => {
   });
 });
 
+describe('years', () => {
+  it.each([
+    [1899, false],
+    [1900, true],
+    [2999, true],
+    [3000, false],
+  ])('%i is %s', (year, valid) => {
+    expect(createSeasonSchema.safeParse({ seriesId: id, ordinal: 1, title: 'x', year }).success).toBe(valid);
+  });
+});
+
 describe('tagNameSchema', () => {
   it('trims and keeps the capitalization', () => {
     expect(tagNameSchema.parse('  Slice of Life ')).toBe('Slice of Life');
@@ -59,9 +70,20 @@ describe('catalogProposalSchema', () => {
     expect(catalogProposalSchema.safeParse({ kind: 'add_season', seriesId: id, season }).success).toBe(true);
   });
 
-  it('needs a season, and unique ordinals, in a new series', () => {
+  it('leaves out any cover, on the series and on a season', () => {
+    expect(
+      catalogProposalSchema.parse({
+        kind: 'new_series',
+        series: { title: 'x', coverImageId: id },
+        seasons: [{ ...season, coverImageId: id }],
+      }),
+    ).toEqual({ kind: 'new_series', series: { title: 'x' }, seasons: [season] });
+  });
+
+  it('needs no season in a new series, but unique ordinals if it has any', () => {
     const series = { title: 'x' };
-    expect(catalogProposalSchema.safeParse({ kind: 'new_series', series, seasons: [] }).success).toBe(false);
+    expect(catalogProposalSchema.safeParse({ kind: 'new_series', series }).success).toBe(true);
+    expect(catalogProposalSchema.safeParse({ kind: 'new_series', series, seasons: [] }).success).toBe(true);
     expect(
       catalogProposalSchema.safeParse({ kind: 'new_series', series, seasons: [season, season] }).success,
     ).toBe(false);
@@ -69,9 +91,9 @@ describe('catalogProposalSchema', () => {
 });
 
 describe('catalogRequestDecisionSchema', () => {
-  it('needs a note to reject and none to approve', () => {
+  it('takes an optional note to reject', () => {
     expect(catalogRequestDecisionSchema.safeParse({ decision: 'approve' }).success).toBe(true);
-    expect(catalogRequestDecisionSchema.safeParse({ decision: 'reject' }).success).toBe(false);
+    expect(catalogRequestDecisionSchema.safeParse({ decision: 'reject' }).success).toBe(true);
     expect(catalogRequestDecisionSchema.safeParse({ decision: 'reject', decisionNote: ' ' }).success).toBe(false);
     expect(catalogRequestDecisionSchema.safeParse({ decision: 'reject', decisionNote: 'No' }).success).toBe(true);
   });

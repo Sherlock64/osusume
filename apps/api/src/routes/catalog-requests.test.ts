@@ -151,7 +151,6 @@ describe('filing a request', () => {
   it.each([
     ['no kind', { series: { title: 'x' }, seasons: [{ ordinal: 1, title: 'x' }] }],
     ['an unknown kind', { kind: 'new_tag' }],
-    ['no seasons on a new series', { kind: 'new_series', series: { title: 'x' }, seasons: [] }],
     ['a repeated ordinal in a new series', {
       kind: 'new_series',
       series: { title: 'x' },
@@ -179,8 +178,51 @@ describe('filing a request', () => {
     );
   });
 
-  it('refuses a cover that does not exist', async () => {
-    expectError(await file(newSeries({ series: { title: 'x', coverImageId: NO_ID } })), 400, 'unknown_image');
+  it('accepts a new series with no seasons, and approving creates just the series', async () => {
+    const title = unique('Seasonless');
+    const { id } = await filed({ kind: 'new_series', series: { title } });
+    const response = await decide(id, { decision: 'approve' });
+    expect(response.body).toMatchObject({ status: 'approved', seriesTitle: title });
+    const seriesId = (response.body as RequestBody).seriesId ?? '';
+    expect(await t.db.select().from(season).where(eq(season.seriesId, seriesId))).toEqual([]);
+  });
+
+  it('keeps no cover from a member, on the series or a season', async () => {
+    const body = await filed({
+      kind: 'new_series',
+      series: { title: unique('Coverless'), coverImageId: NO_ID },
+      seasons: [{ ordinal: 1, title: 'One', coverImageId: NO_ID }],
+    });
+    expect(JSON.stringify(body.proposal)).not.toContain('coverImageId');
+    const target = await makeSeries();
+    const added = await filed({
+      kind: 'add_season',
+      seriesId: target.id,
+      season: { ordinal: 1, title: 'One', coverImageId: NO_ID },
+    });
+    expect(JSON.stringify(added.proposal)).not.toContain('coverImageId');
+  });
+
+  it('keeps no cover from an admin edit either: images come after approval', async () => {
+    const title = unique('Edited coverless');
+    const { id } = await filed(newSeries());
+    const response = await decide(id, {
+      decision: 'approve',
+      proposal: {
+        kind: 'new_series',
+        series: { title, coverImageId: NO_ID },
+        seasons: [{ ordinal: 1, title: 'One', coverImageId: NO_ID }],
+      },
+    });
+    expect(response.status).toBe(200);
+    expect(JSON.stringify((response.body as RequestBody).proposal)).not.toContain('coverImageId');
+    const [created] = await t.db.select().from(series).where(eq(series.title, title));
+    const rows = await t.db.select().from(season).where(eq(season.seriesId, created?.id ?? ''));
+    expect(rows.map((row) => row.coverImageId)).toEqual([null]);
+  });
+
+  it('refuses a year out of range', async () => {
+    expectError(await file(newSeries({ seasons: [{ ordinal: 1, title: 'x', year: 3000 }] })), 400, 'validation_error');
   });
 
   it('refuses an add-season for a missing series or a taken ordinal', async () => {
@@ -324,16 +366,33 @@ describe('approving', () => {
     expect(rows.map((row) => row.ordinal).sort()).toEqual([5, 6]);
   });
 
-  it('lets an admin send an add-season to a different series', async () => {
-    const wrong = await makeSeries();
-    const right = await makeSeries();
-    const { id } = await filed({ kind: 'add_season', seriesId: wrong.id, season: { ordinal: 1, title: 'Moved' } });
+  it('refuses to repoint an add-season at another series', async () => {
+    const filedFor = await makeSeries();
+    const other = await makeSeries();
+    const { id } = await filed({ kind: 'add_season', seriesId: filedFor.id, season: { ordinal: 1, title: 'Stays' } });
     const response = await decide(id, {
       decision: 'approve',
-      proposal: { kind: 'add_season', seriesId: right.id, season: { ordinal: 1, title: 'Moved' } },
+      proposal: { kind: 'add_season', seriesId: other.id, season: { ordinal: 1, title: 'Stays' } },
     });
-    expect(response.body).toMatchObject({ seriesId: right.id, seriesTitle: right.title });
-    expect(await t.db.select().from(season).where(eq(season.seriesId, wrong.id))).toEqual([]);
+    expectError(response, 400, 'proposal_series_mismatch');
+    expect(await t.db.select().from(season).where(eq(season.seriesId, other.id))).toEqual([]);
+    const [row] = await t.db.select().from(catalogRequest).where(eq(catalogRequest.id, id));
+    expect(row?.status).toBe('pending');
+    expect((await decide(id, { decision: 'reject' })).status).toBe(200);
+  });
+
+  it('can still edit an add-season for the same series', async () => {
+    const target = await makeSeries();
+    const { id } = await filed({ kind: 'add_season', seriesId: target.id, season: { ordinal: 1, title: 'Filed' } });
+    const response = await decide(id, {
+      decision: 'approve',
+      proposal: { kind: 'add_season', seriesId: target.id, season: { ordinal: 3, title: 'Edited' } },
+    });
+    expect(response.status).toBe(200);
+    expect((response.body as RequestBody).proposal).toMatchObject({ season: { ordinal: 3, title: 'Edited' } });
+    expect(await t.db.select().from(season).where(eq(season.seriesId, target.id))).toMatchObject([
+      { ordinal: 3, title: 'Edited' },
+    ]);
   });
 
   it('refuses an edit of another kind', async () => {
@@ -424,15 +483,6 @@ describe('approving', () => {
     expect(row?.status).toBe('pending');
   });
 
-  it('does not create the suggested tags or attach them', async () => {
-    const name = unique('Suggested only');
-    const { id } = await filed(newSeries({ suggestedTags: [name] }));
-    const response = await decide(id, { decision: 'approve' });
-    expect(response.status).toBe(200);
-    expect(await t.db.select().from(tag).where(eq(tag.name, name))).toEqual([]);
-    expect((response.body as RequestBody).proposal).toMatchObject({ suggestedTags: [name] });
-  });
-
   it('applies once when approved twice at the same moment', async () => {
     const title = unique('Raced');
     const { id } = await filed(newSeries({ series: { title } }));
@@ -469,12 +519,131 @@ describe('rejecting', () => {
   });
 
   it.each([
-    ['no note', { decision: 'reject' }],
     ['a blank note', { decision: 'reject', decisionNote: '   ' }],
     ['an unknown decision', { decision: 'maybe' }],
   ])('refuses %s', async (_label, body) => {
     const { id } = await filed();
     expectError(await decide(id, body), 400, 'validation_error');
+  });
+});
+
+describe('rejecting with no note', () => {
+  it('needs no note', async () => {
+    const { id } = await filed();
+    const response = await decide(id, { decision: 'reject' });
+    expect(response.body).toMatchObject({ status: 'rejected', decisionNote: null });
+  });
+});
+
+describe('suggested tags at review', () => {
+  const tagsNamed = (name: string) =>
+    t.db.select().from(tag).where(sql`lower(${tag.name}) = lower(${name})`);
+
+  it('are not created or attached unless accepted', async () => {
+    const name = unique('Not accepted');
+    const { id } = await filed(newSeries({ suggestedTags: [name] }));
+    const response = await decide(id, { decision: 'approve' });
+    expect(response.status).toBe(200);
+    expect(await tagsNamed(name)).toEqual([]);
+    expect((response.body as RequestBody).proposal).toMatchObject({ suggestedTags: [name] });
+  });
+
+  it('create the tag on acceptance and attach it to a new series', async () => {
+    const name = unique('Brand New Tag');
+    const other = unique('Declined Tag');
+    const title = unique('Accepting series');
+    const { id } = await filed(newSeries({ series: { title }, suggestedTags: [name, other] }));
+    const response = await decide(id, { decision: 'approve', acceptSuggestedTags: [name.toUpperCase()] });
+    expect(response.status).toBe(200);
+    const [created] = await tagsNamed(name);
+    expect(created?.name).toBe(name);
+    expect(await tagsNamed(other)).toEqual([]);
+    const detail = await t.request('GET', `/api/v1/series/${(response.body as RequestBody).seriesId ?? ''}`, undefined, {
+      cookie: member.cookie,
+    });
+    expect(detail.body).toMatchObject({ title, tags: [{ id: created?.id, name }] });
+  });
+
+  it('attach the existing tag matching ignoring case, keeping its spelling', async () => {
+    const existing = await makeTag(unique('Existing Spelling'));
+    const { id } = await filed(newSeries({ suggestedTags: [existing.name.toLowerCase()] }));
+    const response = await decide(id, { decision: 'approve', acceptSuggestedTags: [existing.name.toLowerCase()] });
+    const detail = await t.request('GET', `/api/v1/series/${(response.body as RequestBody).seriesId ?? ''}`, undefined, {
+      cookie: member.cookie,
+    });
+    expect(detail.body).toMatchObject({ tags: [{ id: existing.id, name: existing.name }] });
+    expect(await tagsNamed(existing.name)).toHaveLength(1);
+  });
+
+  it('attach to the added season, leaving the series and its other seasons alone', async () => {
+    const name = unique('Season Suggestion');
+    const target = await makeSeries();
+    const { id } = await filed({
+      kind: 'add_season',
+      seriesId: target.id,
+      season: { ordinal: 1, title: 'x' },
+      suggestedTags: [name],
+    });
+    await decide(id, { decision: 'approve', acceptSuggestedTags: [name] });
+    const detail = await t.request('GET', `/api/v1/series/${target.id}`, undefined, { cookie: member.cookie });
+    expect(detail.body).toMatchObject({ tags: [], seasons: [{ ownTags: [{ name }] }] });
+  });
+
+  it('go alongside tags chosen by hand in an edit, with no repeat', async () => {
+    const chosen = await makeTag();
+    const name = unique('Alongside');
+    const { id } = await filed(newSeries({ suggestedTags: [name, chosen.name] }));
+    const response = await decide(id, {
+      decision: 'approve',
+      acceptSuggestedTags: [name, chosen.name],
+      proposal: {
+        kind: 'new_series',
+        series: { title: unique('Alongside series'), tagIds: [chosen.id] },
+      },
+    });
+    expect(response.status).toBe(200);
+    const proposal = (response.body as RequestBody).proposal as { series: { tagIds: string[] } };
+    expect(proposal.series.tagIds).toHaveLength(2);
+  });
+
+  it('refuse a name the member did not suggest, creating nothing', async () => {
+    const name = unique('Never suggested');
+    const { id } = await filed(newSeries({ suggestedTags: ['Something else'] }));
+    expectError(await decide(id, { decision: 'approve', acceptSuggestedTags: [name] }), 400, 'unknown_suggestion');
+    expect(await tagsNamed(name)).toEqual([]);
+    const [row] = await t.db.select().from(catalogRequest).where(eq(catalogRequest.id, id));
+    expect(row?.status).toBe('pending');
+  });
+
+  it('create no tag if the approval fails', async () => {
+    const name = unique('Rolled back tag');
+    const target = await makeSeries();
+    const { id } = await filed({
+      kind: 'add_season',
+      seriesId: target.id,
+      season: { ordinal: 1, title: 'Late' },
+      suggestedTags: [name],
+    });
+    await t.db.insert(season).values({ seriesId: target.id, ordinal: 1, title: 'First' });
+    expectError(await decide(id, { decision: 'approve', acceptSuggestedTags: [name] }), 409, 'ordinal_taken');
+    expect(await tagsNamed(name)).toEqual([]);
+  });
+
+  it('refuse an entry pushed past the tag limit by accepting', async () => {
+    const chosen = await Promise.all(Array.from({ length: 50 }, () => makeTag()));
+    const name = unique('One too many');
+    const { id } = await filed(
+      newSeries({ series: { title: 'x', tagIds: chosen.map((row) => row.id) }, suggestedTags: [name] }),
+    );
+    expectError(await decide(id, { decision: 'approve', acceptSuggestedTags: [name] }), 400, 'too_many_tags');
+    expect(await tagsNamed(name)).toEqual([]);
+  });
+
+  it('cannot be accepted on a rejection', async () => {
+    const name = unique('Rejected suggestion');
+    const { id } = await filed(newSeries({ suggestedTags: [name] }));
+    await decide(id, { decision: 'reject', acceptSuggestedTags: [name] });
+    expect(await tagsNamed(name)).toEqual([]);
   });
 });
 

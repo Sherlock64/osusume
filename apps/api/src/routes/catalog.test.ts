@@ -301,7 +301,8 @@ describe('seasons', () => {
     ['a fractional ordinal', { ordinal: 1.5 }],
     ['a negative episode count', { episodeCount: -1 }],
     ['an unknown season of year', { seasonOfYear: 'monsoon' }],
-    ['a year out of range', { year: 12 }],
+    ['a year before 1900', { year: 1899 }],
+    ['a year after 2999', { year: 3000 }],
   ])('refuses %s', async (_label, values) => {
     const created = await createSeries();
     expectError(
@@ -335,6 +336,12 @@ describe('seasons', () => {
     await createSeason(other.id, { ordinal: 1 });
   });
 
+  it('accepts the first and last allowed years', async () => {
+    const created = await createSeries();
+    expect(await createSeason(created.id, { ordinal: 1, year: 1900 })).toMatchObject({ year: 1900 });
+    expect(await createSeason(created.id, { ordinal: 2, year: 2999 })).toMatchObject({ year: 2999 });
+  });
+
   it('answers 404 for a missing season on read, edit and delete', async () => {
     expectError(await asMember('GET', `/seasons/${NO_ID}`), 404, 'season_not_found');
     expectError(await asAdmin('PATCH', `/seasons/${NO_ID}`, { title: 'x' }), 404, 'season_not_found');
@@ -352,6 +359,57 @@ describe('seasons', () => {
 
     expectError(await asAdmin('DELETE', `/seasons/${listed.id}`), 409, 'season_on_list');
     expect((await asMember('GET', `/seasons/${listed.id}`)).status).toBe(200);
+  });
+});
+
+describe('moving a season', () => {
+  it('moves it, with its list entries and own tags, and the series tags change', async () => {
+    const ownTag = await createTag();
+    const newSeriesTag = await createTag();
+    const from = await createSeries();
+    const to = await createSeries({ tagIds: [newSeriesTag.id] });
+    const entry = await createSeason(from.id, { ordinal: 1, tagIds: [ownTag.id] });
+    await t.db.insert(listEntry).values({ userId: member.id, seasonId: entry.id, status: 'completed', note: 'Kept' });
+
+    const response = await asAdmin('PATCH', `/seasons/${entry.id}`, { seriesId: to.id });
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({
+      id: entry.id,
+      seriesId: to.id,
+      series: { id: to.id, title: to.title },
+      ownTags: [ownTag],
+    });
+    expect((response.body as SeasonBody).effectiveTags).toHaveLength(2);
+
+    expect(((await asMember('GET', `/series/${from.id}`)).body as SeriesBody).seasons).toEqual([]);
+    expect(((await asMember('GET', `/series/${to.id}`)).body as SeriesBody).seasons).toHaveLength(1);
+    const [listed] = await t.db.select().from(listEntry).where(eq(listEntry.seasonId, entry.id));
+    expect(listed).toMatchObject({ userId: member.id, status: 'completed', note: 'Kept' });
+  });
+
+  it('refuses a number taken in the new series, and can take a new number with the move', async () => {
+    const from = await createSeries();
+    const to = await createSeries();
+    const entry = await createSeason(from.id, { ordinal: 1 });
+    await createSeason(to.id, { ordinal: 1 });
+    expectError(await asAdmin('PATCH', `/seasons/${entry.id}`, { seriesId: to.id }), 409, 'ordinal_taken');
+    expect((await asMember('GET', `/seasons/${entry.id}`)).body).toMatchObject({ seriesId: from.id });
+    const moved = await asAdmin('PATCH', `/seasons/${entry.id}`, { seriesId: to.id, ordinal: 2 });
+    expect(moved.body).toMatchObject({ seriesId: to.id, ordinal: 2 });
+  });
+
+  it('refuses a missing series and refuses a member', async () => {
+    const from = await createSeries();
+    const entry = await createSeason(from.id);
+    expectError(await asAdmin('PATCH', `/seasons/${entry.id}`, { seriesId: NO_ID }), 404, 'series_not_found');
+    expectError(await asMember('PATCH', `/seasons/${entry.id}`, { seriesId: from.id }), 403, 'admin_required');
+  });
+
+  it('sending the series it is already in changes nothing', async () => {
+    const from = await createSeries();
+    const entry = await createSeason(from.id);
+    const response = await asAdmin('PATCH', `/seasons/${entry.id}`, { seriesId: from.id });
+    expect(response.body).toMatchObject({ seriesId: from.id, ordinal: 1 });
   });
 });
 

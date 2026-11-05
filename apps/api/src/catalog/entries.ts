@@ -45,6 +45,20 @@ export async function assertTagsExist(tx: Transaction, ids: readonly string[]): 
   }
 }
 
+/**
+ * The tag with this name ignoring case, created with this spelling if there is none. A tag that
+ * exists keeps its own spelling.
+ */
+export async function findOrCreateTag(tx: Transaction, name: string): Promise<string> {
+  await tx.insert(tag).values({ name }).onConflictDoNothing();
+  const [row] = await tx
+    .select({ id: tag.id })
+    .from(tag)
+    .where(sql`lower(${tag.name}) = lower(${name})`);
+  if (!row) throw new Error('tag was not found or created');
+  return row.id;
+}
+
 /** Refuses a cover that is not an uploaded image. */
 export async function assertImagesExist(tx: Transaction, ids: readonly string[]): Promise<void> {
   const wanted = [...new Set(ids)];

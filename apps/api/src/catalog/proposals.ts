@@ -2,10 +2,11 @@ import type { CatalogProposal } from '@osusume/shared';
 import { eq } from 'drizzle-orm';
 import type { Transaction } from '../db/client.ts';
 import { series } from '../db/schema.ts';
+import { ApiError } from '../lib/errors.ts';
 import {
-  assertImagesExist,
   assertOrdinalFree,
   assertTagsExist,
+  findOrCreateTag,
   insertSeason,
   insertSeries,
   seriesNotFound,
@@ -15,29 +16,20 @@ function tagIdsOf(proposal: CatalogProposal): string[] {
   return proposal.kind === 'new_series'
     ? [
         ...(proposal.series.tagIds ?? []),
-        ...proposal.seasons.flatMap((season) => season.tagIds ?? []),
+        ...(proposal.seasons ?? []).flatMap((season) => season.tagIds ?? []),
       ]
     : (proposal.season.tagIds ?? []);
 }
 
-function coverIdsOf(proposal: CatalogProposal): string[] {
-  const covers =
-    proposal.kind === 'new_series'
-      ? [proposal.series.coverImageId, ...proposal.seasons.map((season) => season.coverImageId)]
-      : [proposal.season.coverImageId];
-  return covers.filter((cover) => cover !== null && cover !== undefined);
-}
-
 /**
- * Refuses a proposal that could not be applied now: a tag outside the vocabulary, a cover that
- * does not exist, or a season for a missing series or a taken ordinal. Hold the catalog lock.
+ * Refuses a proposal that could not be applied now: a tag outside the vocabulary, or a season
+ * for a missing series or a taken ordinal. Hold the catalog lock.
  */
 export async function assertProposalApplies(
   tx: Transaction,
   proposal: CatalogProposal,
 ): Promise<void> {
   await assertTagsExist(tx, tagIdsOf(proposal));
-  await assertImagesExist(tx, coverIdsOf(proposal));
   if (proposal.kind === 'add_season') {
     const [target] = await tx
       .select({ id: series.id })
@@ -55,7 +47,7 @@ export async function applyProposal(tx: Transaction, proposal: CatalogProposal):
     return proposal.seriesId;
   }
   const seriesId = await insertSeries(tx, proposal.series);
-  for (const season of proposal.seasons) await insertSeason(tx, seriesId, season);
+  for (const season of proposal.seasons ?? []) await insertSeason(tx, seriesId, season);
   return seriesId;
 }
 
@@ -68,6 +60,33 @@ export function withUniqueSuggestions<Proposal extends CatalogProposal>(proposal
   return { ...proposal, suggestedTags: [...byKey.values()] };
 }
 
+/**
+ * Resolves accepted names to tags, creating any that do not exist, and attaches them: to a new
+ * series, since tags belong to the series, or to the season a request adds, so that one season
+ * does not retag the others. Names must be among what the member suggested. Hold the catalog lock.
+ */
+export async function acceptSuggestions(
+  tx: Transaction,
+  filed: CatalogProposal,
+  proposal: CatalogProposal,
+  names: readonly string[],
+): Promise<CatalogProposal> {
+  const suggested = new Map((filed.suggestedTags ?? []).map((name) => [name.toLowerCase(), name]));
+  const tagIds: string[] = [];
+  for (const key of new Set(names.map((name) => name.toLowerCase()))) {
+    const name = suggested.get(key);
+    if (name === undefined) {
+      throw new ApiError(400, 'unknown_suggestion', 'An accepted tag is not among the suggestions.');
+    }
+    tagIds.push(await findOrCreateTag(tx, name));
+  }
+  const added = <Entry extends { tagIds?: string[] | undefined }>(entry: Entry): Entry =>
+    tagIds.length === 0 ? entry : { ...entry, tagIds: [...new Set([...(entry.tagIds ?? []), ...tagIds])] };
+  return proposal.kind === 'new_series'
+    ? { ...proposal, series: added(proposal.series) }
+    : { ...proposal, season: added(proposal.season) };
+}
+
 /** The proposal with a deleted tag taken off everything that chose it. */
 export function withoutTag(proposal: CatalogProposal, tagId: string): CatalogProposal {
   const without = <Entry extends { tagIds?: string[] | undefined }>(entry: Entry): Entry => ({
@@ -75,6 +94,6 @@ export function withoutTag(proposal: CatalogProposal, tagId: string): CatalogPro
     tagIds: entry.tagIds?.filter((id) => id !== tagId),
   });
   return proposal.kind === 'new_series'
-    ? { ...proposal, series: without(proposal.series), seasons: proposal.seasons.map(without) }
+    ? { ...proposal, series: without(proposal.series), seasons: proposal.seasons?.map(without) }
     : { ...proposal, season: without(proposal.season) };
 }
