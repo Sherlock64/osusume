@@ -9,8 +9,7 @@ import {
   decisionSchema,
   idParamSchema,
   invitePreviewSchema,
-  inviteRequestListQuerySchema,
-  inviteRequestSchema,
+  inviteRequestSentResponseSchema,
   paginatedSchema,
 } from '@osusume/shared';
 import { and, eq, or, sql } from 'drizzle-orm';
@@ -44,9 +43,6 @@ import { callerIsAdmin, requireAdmin, requireSession } from '../middleware/auth.
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
-/** All a non-admin hears: nobody learns if an address is registered, banned or already invited. */
-const inviteRefused = () =>
-  new ApiError(409, 'invite_refused', 'This email address cannot be invited.');
 const inviteNotFound = () => new ApiError(404, 'invite_not_found', 'No such invite request.');
 const inviteInvalid = () =>
   new ApiError(404, 'invite_invalid', 'This invite link is not valid or has expired.');
@@ -69,26 +65,19 @@ async function assertNoOpenInvite(tx: Transaction, email: string): Promise<void>
   if (open) throw inviteOpen();
 }
 
-function toInviteRequest(row: typeof inviteRequest.$inferSelect) {
+function toAdminInviteRequest(row: typeof inviteRequest.$inferSelect, requesterUsername: string | null) {
   return {
     id: row.id,
     inviteeEmail: row.inviteeEmail,
     status: row.status,
     expiresAt: row.expiresAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
-  };
-}
-
-function toAdminInviteRequest(row: typeof inviteRequest.$inferSelect, requesterUsername: string | null) {
-  return {
-    ...toInviteRequest(row),
     requesterId: row.requesterId,
     requesterUsername,
     decidedBy: row.decidedBy,
   };
 }
 
-const inviteRequestContent = { 'application/json': { schema: inviteRequestSchema } };
 const adminInviteRequestContent = { 'application/json': { schema: adminInviteRequestSchema } };
 
 const createRequestRoute = createRoute({
@@ -101,27 +90,14 @@ const createRequestRoute = createRoute({
     body: { required: true, content: { 'application/json': { schema: createInviteRequestSchema } } },
   },
   responses: {
-    201: { description: 'The request is waiting for an admin', content: inviteRequestContent },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...conflict,
-  },
-});
-
-const listMineRoute = createRoute({
-  method: 'get',
-  path: '/invite-requests',
-  summary: 'The invite requests the current user made, newest first',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { query: inviteRequestListQuerySchema },
-  responses: {
-    200: {
-      description: 'A page of invite requests',
-      content: { 'application/json': { schema: paginatedSchema(inviteRequestSchema) } },
+    202: {
+      description:
+        'The same answer whether the request was queued or refused, so a non-admin learns nothing about the address',
+      content: { 'application/json': { schema: inviteRequestSentResponseSchema } },
     },
     ...invalidRequest,
     ...unauthenticated,
+    409: { description: 'Admins only: why the address was refused', content: conflict[409].content },
   },
 });
 
@@ -228,18 +204,12 @@ export const inviteRoutes = createRouter()
     const { email } = c.req.valid('json');
     const { id: requesterId, role } = c.var.currentUser;
     try {
-      const created = await db.transaction(async (tx) => {
+      await db.transaction(async (tx) => {
         await lockEmails(tx, email);
         await assertEmailUnused(tx, email);
         await assertNoOpenInvite(tx, email);
-        const [row] = await tx
-          .insert(inviteRequest)
-          .values({ requesterId, inviteeEmail: email })
-          .returning();
-        if (!row) throw new Error('invite request was not created');
-        return row;
+        await tx.insert(inviteRequest).values({ requesterId, inviteeEmail: email });
       });
-      return c.json(toInviteRequest(created), 201);
     } catch (error) {
       const refusal = isUniqueViolation(error, 'invite_request_one_pending_per_email')
         ? inviteOpen()
@@ -247,30 +217,10 @@ export const inviteRoutes = createRouter()
       const aboutAddress =
         isAddressRefusal(refusal) ||
         (refusal instanceof ApiError && refusal.code === 'invite_already_open');
-      if (aboutAddress && role !== 'admin') throw inviteRefused();
-      throw refusal;
+      // Only an admin may learn that an address is registered, banned or already invited.
+      if (!aboutAddress || role === 'admin') throw refusal;
     }
-  })
-  .openapi(listMineRoute, async (c) => {
-    const { db } = c.var.deps;
-    const { cursor, limit } = c.req.valid('query');
-    const page = keyset({
-      sortColumn: inviteRequest.createdAt,
-      idColumn: inviteRequest.id,
-      direction: 'desc',
-      cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
-    });
-    const rows = await db
-      .select()
-      .from(inviteRequest)
-      .where(and(eq(inviteRequest.requesterId, c.var.currentUser.id), page.where))
-      .orderBy(...page.orderBy)
-      .limit(limit + 1);
-    const { items, nextCursor } = toPage(rows, limit, (row) => ({
-      sort: row.createdAt,
-      id: row.id,
-    }));
-    return c.json({ items: items.map(toInviteRequest), nextCursor }, 200);
+    return c.json({ message: 'Request sent to the admins' as const }, 202);
   })
   .openapi(adminListRoute, async (c) => {
     const { db } = c.var.deps;

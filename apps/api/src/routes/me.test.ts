@@ -141,7 +141,7 @@ describe('password reset', () => {
     const member = await t.seedLoggedIn();
     await requestReset(member.email);
     await reset(tokenFrom(await waitForMail(member.email)));
-    expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
+    expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
   });
 });
 
@@ -534,7 +534,7 @@ describe('deleting your own account', () => {
       expect(response.headers.get('set-cookie')).toContain('better-auth.session_token=;');
       expect(await t.db.select().from(user).where(eq(user.id, someone.id))).toEqual([]);
       expect(await t.db.select().from(session).where(eq(session.userId, someone.id))).toEqual([]);
-      expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: someone.cookie }), 401, 'unauthenticated');
+      expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: someone.cookie }), 401, 'unauthenticated');
       expect(await canLogin(someone.username, PASSWORD)).toBe(false);
     }
   });
@@ -578,15 +578,15 @@ describe('deleting your own account', () => {
       await t.db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, member.email)),
     ).toEqual([]);
     const again = await t.request('POST', '/api/v1/invite-requests', { email: member.email }, { cookie: admin.cookie });
-    expect(again.status).toBe(201);
+    expect(again.status).toBe(202);
   });
 
   it('revokes approved invites they requested', async () => {
     const member = await t.seedLoggedIn();
     const invitee = uniqueEmail('invitee');
-    const created = await t.request('POST', '/api/v1/invite-requests', { email: invitee }, { cookie: member.cookie });
-    const { id } = created.body as { id: string };
-    await t.request('POST', `/api/v1/admin/invite-requests/${id}/decision`, { decision: 'approve' }, { cookie: admin.cookie });
+    await t.request('POST', '/api/v1/invite-requests', { email: invitee }, { cookie: member.cookie });
+    const [open] = await t.db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, invitee));
+    await t.request('POST', `/api/v1/admin/invite-requests/${open?.id ?? ''}/decision`, { decision: 'approve' }, { cookie: admin.cookie });
     const token = tokenFrom(await waitForMail(invitee));
 
     await remove(member.cookie);

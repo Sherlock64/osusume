@@ -42,6 +42,8 @@ export interface RequestOptions {
 export interface TestResponse {
   status: number;
   body: unknown;
+  /** The body exactly as sent, for comparing responses byte for byte. */
+  text: string;
   headers: Headers;
 }
 
@@ -98,7 +100,7 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
     } catch {
       // Not JSON; tests see the raw text.
     }
-    return { status: response.status, body: parsed, headers: response.headers };
+    return { status: response.status, body: parsed, text, headers: response.headers };
   }
 
   /** Uploads a file as multipart form data, declaring the given type and name. */
@@ -126,7 +128,7 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
     } catch {
       // Not JSON; tests see the raw text.
     }
-    return { status: response.status, body: parsed, headers: response.headers };
+    return { status: response.status, body: parsed, text, headers: response.headers };
   }
 
   /** Logs in through Better Auth and returns the session cookie. */

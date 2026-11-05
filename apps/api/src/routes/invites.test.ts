@@ -29,14 +29,21 @@ afterAll(async () => {
   await t.cleanup();
 });
 
-interface Created {
-  id: string;
-}
+const SENT = { message: 'Request sent to the admins' };
 
+const ask = (email: string, cookie = member.cookie) =>
+  t.request('POST', '/api/v1/invite-requests', { email }, { cookie });
+
+const rowsFor = (email: string) =>
+  t.db.select().from(inviteRequest).where(sql`lower(${inviteRequest.inviteeEmail}) = lower(${email})`);
+
+/** Requests an invite and finds its row, which the response does not identify. */
 async function requestInvite(email = uniqueEmail('invitee')) {
-  const response = await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie });
-  expect(response.status).toBe(201);
-  return { id: (response.body as Created).id, email };
+  const response = await ask(email);
+  expect(response.status).toBe(202);
+  const open = (await rowsFor(email)).find((row) => row.status === 'pending');
+  if (!open) throw new Error('no pending request was created');
+  return { id: open.id, email };
 }
 
 const decide = (id: string, decision: 'approve' | 'reject') =>
@@ -61,87 +68,91 @@ describe('POST /invite-requests', () => {
     expectError(await t.request('POST', '/api/v1/invite-requests', { email: uniqueEmail() }), 401, 'unauthenticated');
   });
 
-  it('creates a pending request and normalizes the email', async () => {
-    const entered = `  ${uniqueEmail('MIXED').toUpperCase()} `;
-    const response = await t.request('POST', '/api/v1/invite-requests', { email: entered }, { cookie: member.cookie });
-    expect(response.status).toBe(201);
-    expect(response.body).toMatchObject({
-      inviteeEmail: entered.trim().toLowerCase(),
-      status: 'pending',
-      expiresAt: null,
-    });
-    expect(response.body).not.toHaveProperty('tokenHash');
+  it('creates a pending request for the admin queue and normalizes the email', async () => {
+    const email = uniqueEmail('MIXED');
+    const response = await ask(`  ${email.toUpperCase()} `);
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual(SENT);
+    expect(await rowsFor(email)).toMatchObject([
+      { inviteeEmail: email.toLowerCase(), status: 'pending', requesterId: member.id, expiresAt: null },
+    ]);
+  });
+
+  it('refuses a malformed address, whoever asks', async () => {
+    expectError(await ask('not an email'), 400, 'validation_error');
+    expectError(await ask('not an email', admin.cookie), 400, 'validation_error');
   });
 
   it('allows unlimited invites for different emails', async () => {
     for (let i = 0; i < 5; i += 1) await requestInvite();
   });
 
-  describe('an address with an account or on the blacklist', () => {
-    const ask = (email: string, cookie: string) =>
-      t.request('POST', '/api/v1/invite-requests', { email }, { cookie });
+  async function blacklisted() {
+    const email = uniqueEmail('blacklisted');
+    await t.db.insert(emailBlacklist).values({ email });
+    return email;
+  }
 
-    async function blacklisted() {
-      const email = uniqueEmail('blacklisted');
-      await t.db.insert(emailBlacklist).values({ email });
-      return email;
-    }
+  /** Every way an address can be refused, ignoring case. */
+  const refusable: [string, () => Promise<string>][] = [
+    ['with an account', async () => (await t.seedUser()).email.toUpperCase()],
+    ['on the blacklist', async () => (await blacklisted()).toUpperCase()],
+    ['with a pending invite', async () => (await requestInvite()).email.toUpperCase()],
+    ['with an approved invite', async () => (await approvedInvite()).email.toUpperCase()],
+  ];
 
-    it('gets a member the same refusal for both, ignoring case', async () => {
-      const banned = await ask((await blacklisted()).toUpperCase(), member.cookie);
-      const registered = await ask((await t.seedUser()).email.toUpperCase(), member.cookie);
-      expectError(banned, 409, 'invite_refused');
-      expect(registered.status).toBe(banned.status);
-      expect(registered.body).toEqual(banned.body);
-    });
+  describe('gives a member byte for byte the same answer', () => {
+    it.each(refusable)('for an address %s as for one that goes ahead', async (_label, make) => {
+      const accepted = await ask(uniqueEmail('accepted'));
+      const email = await make();
+      const before = await rowsFor(email);
+      const delivered = (await mailsTo(email)).length;
 
-    it('gets an admin the specific reason, ignoring case', async () => {
-      expectError(await ask((await blacklisted()).toUpperCase(), admin.cookie), 409, 'email_blacklisted');
-      expectError(await ask((await t.seedUser()).email.toUpperCase(), admin.cookie), 409, 'email_in_use');
+      const refused = await ask(email);
+
+      expect(refused.status).toBe(accepted.status);
+      expect(refused.status).toBe(202);
+      expect(refused.text).toBe(accepted.text);
+      expect(JSON.parse(refused.text)).toEqual(SENT);
+      expect([...refused.headers.entries()]).toEqual([...accepted.headers.entries()]);
+      expect(await rowsFor(email)).toEqual(before);
+      expect(await mailsTo(email)).toHaveLength(delivered);
     });
   });
 
-  it('refuses a second open invite: pending', async () => {
+  it('never tells the requester the id of a request', async () => {
+    const email = uniqueEmail('invitee');
+    const response = await ask(email);
+    const [row] = await rowsFor(email);
+    expect(response.text).not.toContain(row?.id);
+    expect(response.text).not.toContain(email);
+  });
+
+  it('sends nothing to the address, which only an approval does', async () => {
     const { email } = await requestInvite();
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: admin.cookie }),
-      409,
-      'invite_already_open',
-    );
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
-      409,
-      'invite_refused',
-    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(await mailsTo(email)).toEqual([]);
   });
 
-  it('refuses a second open invite: approved and unexpired', async () => {
-    const { email } = await approvedInvite();
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: admin.cookie }),
-      409,
-      'invite_already_open',
-    );
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
-      409,
-      'invite_refused',
-    );
+  it('tells an admin the specific reason, creating nothing', async () => {
+    const registered = (await t.seedUser()).email.toUpperCase();
+    expectError(await ask(registered, admin.cookie), 409, 'email_in_use');
+    expect(await rowsFor(registered)).toEqual([]);
+    const banned = await blacklisted();
+    expectError(await ask(banned, admin.cookie), 409, 'email_blacklisted');
+    expect(await rowsFor(banned)).toEqual([]);
+    const pending = await requestInvite();
+    expectError(await ask(pending.email, admin.cookie), 409, 'invite_already_open');
+    const approved = await approvedInvite();
+    expectError(await ask(approved.email, admin.cookie), 409, 'invite_already_open');
   });
 
-  it('gives a member the same refusal for an account, a ban and an open invite', async () => {
-    const ask = (email: string) =>
-      t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie });
-    const banned = uniqueEmail('blacklisted');
-    await t.db.insert(emailBlacklist).values({ email: banned });
-    const bodies = [
-      await ask(banned),
-      await ask((await t.seedUser()).email),
-      await ask((await requestInvite()).email),
-    ];
-    expect(bodies.map((response) => response.status)).toEqual([409, 409, 409]);
-    expect(bodies[1]?.body).toEqual(bodies[0]?.body);
-    expect(bodies[2]?.body).toEqual(bodies[0]?.body);
+  it('queues an admin\'s own request and answers the same as for a member', async () => {
+    const email = uniqueEmail('from-admin');
+    const response = await ask(email, admin.cookie);
+    expect(response.status).toBe(202);
+    expect(response.body).toEqual(SENT);
+    expect(await rowsFor(email)).toMatchObject([{ status: 'pending', requesterId: admin.id }]);
   });
 
   it('allows a new request once the earlier one is rejected, revoked or expired', async () => {
@@ -164,25 +175,20 @@ describe('POST /invite-requests', () => {
     await requestInvite(expired.email);
   });
 
-  it('lets exactly one concurrent request through', async () => {
+  it('lets exactly one concurrent request through, and a member cannot tell which', async () => {
     const email = uniqueEmail('race');
     const responses = await Promise.all(
-      Array.from({ length: 10 }, (_, i) =>
-        t.request(
-          'POST',
-          '/api/v1/invite-requests',
-          { email: i % 2 === 0 ? email : email.toUpperCase() },
-          { cookie: member.cookie },
-        ),
-      ),
+      Array.from({ length: 10 }, (_, i) => ask(i % 2 === 0 ? email : email.toUpperCase())),
     );
+    expect(new Set(responses.map((response) => `${String(response.status)} ${response.text}`)).size).toBe(1);
+    expect(await rowsFor(email)).toHaveLength(1);
+  });
+
+  it('tells concurrent admins apart: one is queued, the rest hear why not', async () => {
+    const email = uniqueEmail('race');
+    const responses = await Promise.all(Array.from({ length: 10 }, () => ask(email, admin.cookie)));
     const statuses = responses.map((response) => response.status).sort();
-    expect(statuses).toEqual([201, ...Array<number>(9).fill(409)]);
-    const rows = await t.db
-      .select()
-      .from(inviteRequest)
-      .where(sql`lower(${inviteRequest.inviteeEmail}) = ${email}`);
-    expect(rows).toHaveLength(1);
+    expect(statuses).toEqual([202, ...Array<number>(9).fill(409)]);
   });
 
   it('lets exactly one through when the earlier invite is approved, which no index covers', async () => {
@@ -191,49 +197,18 @@ describe('POST /invite-requests', () => {
       .update(inviteRequest)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(inviteRequest.inviteeEmail, email));
-    const responses = await Promise.all(
-      Array.from({ length: 6 }, () =>
-        t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
-      ),
-    );
-    expect(responses.filter((response) => response.status === 201)).toHaveLength(1);
+    await Promise.all(Array.from({ length: 6 }, () => ask(email)));
+    expect((await rowsFor(email)).filter((row) => row.status === 'pending')).toHaveLength(1);
   });
 });
 
-describe('GET /invite-requests', () => {
-  it('lists only your own, with cursor pagination', async () => {
-    const someone = await t.seedLoggedIn();
-    const emails = [uniqueEmail('page'), uniqueEmail('page'), uniqueEmail('page')];
-    for (const email of emails) {
-      const response = await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: someone.cookie });
-      expect(response.status).toBe(201);
+describe('a member has no record of who they invited', () => {
+  it.each(['', '?mine=true', '?mine=false'])('GET /invite-requests%s does not exist', async (query) => {
+    await requestInvite();
+    for (const cookie of [member.cookie, admin.cookie]) {
+      const response = await t.request('GET', `/api/v1/invite-requests${query}`, undefined, { cookie });
+      expect(response.status).toBe(404);
     }
-
-    const first = await t.request('GET', '/api/v1/invite-requests?mine=true&limit=2', undefined, { cookie: someone.cookie });
-    const firstBody = first.body as { items: { inviteeEmail: string }[]; nextCursor: string };
-    expect(firstBody.items).toHaveLength(2);
-    expect(firstBody.nextCursor).toEqual(expect.any(String));
-
-    const second = await t.request(
-      'GET',
-      `/api/v1/invite-requests?limit=2&cursor=${firstBody.nextCursor}`,
-      undefined,
-      { cookie: someone.cookie },
-    );
-    const secondBody = second.body as typeof firstBody;
-    expect(secondBody.items).toHaveLength(1);
-    expect(secondBody.nextCursor).toBeNull();
-    expect([...firstBody.items, ...secondBody.items].map((item) => item.inviteeEmail).sort()).toEqual(
-      [...emails].sort(),
-    );
-  });
-
-  it('has no way to see other people\'s requests', async () => {
-    expectError(await t.request('GET', '/api/v1/invite-requests?mine=false', undefined, { cookie: admin.cookie }), 400, 'validation_error');
-  });
-
-  it('refuses a cursor it did not issue', async () => {
-    expectError(await t.request('GET', '/api/v1/invite-requests?cursor=garbage', undefined, { cookie: member.cookie }), 400, 'invalid_cursor');
   });
 });
 
@@ -330,13 +305,10 @@ describe('POST /admin/invite-requests/{id}/decision', () => {
     });
     try {
       const failingAdmin = await failing.seedLoggedIn({ role: 'admin' });
-      const created = await failing.request(
-        'POST',
-        '/api/v1/invite-requests',
-        { email: uniqueEmail('unsent') },
-        { cookie: failingAdmin.cookie },
-      );
-      const { id } = created.body as Created;
+      const email = uniqueEmail('unsent');
+      await failing.request('POST', '/api/v1/invite-requests', { email }, { cookie: failingAdmin.cookie });
+      const [pending] = await failing.db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, email));
+      const id = pending?.id ?? '';
       expectError(
         await failing.request(
           'POST',
@@ -570,8 +542,9 @@ describe('GET /invites/{token}', () => {
     // Revoked by the requester's removal: the status changes but the hash stays.
     const someone = await t.seedLoggedIn();
     const orphanEmail = uniqueEmail('orphan');
-    const created = await t.request('POST', '/api/v1/invite-requests', { email: orphanEmail }, { cookie: someone.cookie });
-    await decide((created.body as Created).id, 'approve');
+    expect((await ask(orphanEmail, someone.cookie)).status).toBe(202);
+    const [orphan] = await rowsFor(orphanEmail);
+    await decide(orphan?.id ?? '', 'approve');
     const orphanToken = tokenFrom(await waitForMail(orphanEmail));
     await t.db.delete(user).where(eq(user.id, someone.id));
 
@@ -624,7 +597,8 @@ describe('the email lock', () => {
     const response = await callWhileLocked(email, blacklist(email), () =>
       t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
     );
-    expectError(response, 409, 'invite_refused');
+    expect(response.status).toBe(202);
+    expect(await rowsFor(email)).toEqual([]);
   });
 
   it('makes a request wait for an invite being opened, which no index covers', async () => {

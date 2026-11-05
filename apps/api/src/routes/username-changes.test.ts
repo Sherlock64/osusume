@@ -168,7 +168,7 @@ describe('the admin queue', () => {
   it('keeps sessions working across a rename', async () => {
     const { member, id } = await requested();
     await decide(id, 'approve');
-    const response = await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie });
+    const response = await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie });
     expect(response.status).toBe(200);
   });
 });

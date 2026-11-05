@@ -122,7 +122,7 @@ describe('logging in', () => {
   it('signs out', async () => {
     const member = await t.seedLoggedIn();
     expect((await t.request('POST', '/api/auth/sign-out', {}, { cookie: member.cookie })).status).toBe(200);
-    expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
+    expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
   });
 });
 
@@ -166,13 +166,13 @@ describe('rate limiting', () => {
 
 describe('authorization middleware', () => {
   it('rejects anonymous requests', async () => {
-    expectError(await t.request('GET', '/api/v1/invite-requests'), 401, 'unauthenticated');
+    expectError(await t.request('GET', '/api/v1/username-change-requests'), 401, 'unauthenticated');
     expectError(await t.request('GET', '/api/v1/admin/users'), 401, 'unauthenticated');
   });
 
   it('rejects a forged cookie', async () => {
     expectError(
-      await t.request('GET', '/api/v1/invite-requests', undefined, {
+      await t.request('GET', '/api/v1/username-change-requests', undefined, {
         cookie: 'better-auth.session_token=forged.value',
       }),
       401,
@@ -196,7 +196,7 @@ describe('authorization middleware', () => {
   it('rejects a disabled user who somehow still has a session', async () => {
     const member = await t.seedLoggedIn();
     await t.db.update(user).set({ disabledAt: new Date() }).where(eq(user.id, member.id));
-    expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie }), 403, 'account_disabled');
+    expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie }), 403, 'account_disabled');
   });
 
   it('has no user search', async () => {

@@ -75,23 +75,26 @@ export type TokenBody = z.infer<typeof tokenBodySchema>;
 export const createInviteRequestSchema = z.object({ email: emailSchema });
 export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>;
 
-export const inviteRequestListQuerySchema = mineQuerySchema;
+/**
+ * The answer to requesting an invite, whether or not the address could be invited. Nothing in it
+ * may differ between the two, so it holds no id or status of the request.
+ */
+export const inviteRequestSentResponseSchema = z.object({
+  message: z.literal('Request sent to the admins'),
+});
+export type InviteRequestSentResponse = z.infer<typeof inviteRequestSentResponseSchema>;
 
-export const inviteRequestSchema = z.object({
+export const adminInviteRequestListQuerySchema = paginationQuerySchema.extend({
+  status: inviteRequestStatusSchema.optional(),
+});
+
+export const adminInviteRequestSchema = z.object({
   id: z.uuid(),
   inviteeEmail: z.string(),
   status: inviteRequestStatusSchema,
   /** Set on approval. An approved invite past this time no longer works or counts as open. */
   expiresAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
-});
-export type InviteRequest = z.infer<typeof inviteRequestSchema>;
-
-export const adminInviteRequestListQuerySchema = paginationQuerySchema.extend({
-  status: inviteRequestStatusSchema.optional(),
-});
-
-export const adminInviteRequestSchema = inviteRequestSchema.extend({
   /** Null once the requester has been removed. */
   requesterId: z.uuid().nullable(),
   requesterUsername: z.string().nullable(),

@@ -126,7 +126,7 @@ describe('acting on your own account', () => {
     expect(response.status).toBe(200);
     expect(response.body).toMatchObject({ role: 'member' });
     expectError(await t.request('GET', '/api/v1/admin/users', undefined, { cookie: self.cookie }), 403, 'admin_required');
-    expect((await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: self.cookie })).status).toBe(200);
+    expect((await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: self.cookie })).status).toBe(200);
   });
 
   it('disable: answers cleanly, with the session gone and login refused', async () => {
@@ -204,7 +204,7 @@ describe('disable and enable', () => {
     expect(disabled.body).toMatchObject({ disabledAt: expect.any(String) as string });
 
     expect(await t.db.select().from(session).where(eq(session.userId, member.id))).toEqual([]);
-    expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
+    expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
     expect((await t.request('GET', '/api/auth/get-session', undefined, { cookie: member.cookie })).body).toBeNull();
 
     const login = await t.request('POST', '/api/auth/sign-in/username', {
@@ -273,12 +273,12 @@ describe('remove', () => {
     expect(
       await t.db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, member.email)),
     ).toEqual([]);
-    expectError(await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
+    expectError(await t.request('GET', '/api/v1/username-change-requests', undefined, { cookie: member.cookie }), 401, 'unauthenticated');
     expect(await canLogin(member.username)).toBe(401);
     expect(await t.db.select().from(emailBlacklist).where(eq(emailBlacklist.email, member.email))).toEqual([]);
 
     const again = await t.request('POST', '/api/v1/invite-requests', { email: member.email }, { cookie: admin.cookie });
-    expect(again.status).toBe(201);
+    expect(again.status).toBe(202);
   });
 
   it('kills a reset link at once', async () => {
@@ -327,7 +327,7 @@ describe('ban', () => {
 
     const invited = (email: string) => t.request('POST', '/api/v1/invite-requests', { email }, { cookie: admin.cookie });
     expectError(await invited(newEmail), 409, 'email_blacklisted');
-    expect((await invited(oldEmail)).status).toBe(201);
+    expect((await invited(oldEmail)).status).toBe(202);
   });
 
   it('is one transaction: nothing is blacklisted if the delete fails', async () => {
