@@ -58,6 +58,19 @@ That limiter counts per client IP on `/api/auth`. Other routes that check a pass
 10 seconds per user. Both keep their counts in memory: they reset on restart, and each api process
 counts separately, so running N instances allows N times the attempts.
 
+Answers about an address give nothing away. A non-admin always gets the same success from
+`POST /invite-requests`, including for an address with an account, on the blacklist or with an open
+invite: a refused address creates no row and sends nothing, and only the admin queue,
+`GET /admin/invite-requests`, shows requests. Members have no record of who they invited.
+`POST /me/email`, once the password is correct, and `POST /me/email/verify` always answer a
+non-admin "Request completed", whatever happened. So that timing or a failed send does not tell the
+two apart, a non-admin's link is sent after the response; a send failure is logged and drops the
+link. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
+and rate limiting are still reported to everyone.
+
+Any invite link that cannot be used gets one identical answer from `GET /invites/{token}` and
+`POST /invites/{token}/accept`, for every caller, admins included.
+
 Routes that need a login use `requireSession` or `requireAdmin` from
 `apps/api/src/middleware/auth.ts` as their `middleware`, then read `c.var.currentUser`.
 
@@ -80,8 +93,9 @@ The upload limit and named sizes are set in `packages/shared/src/catalog.ts`, th
 in `apps/api/src/lib/image-processing.ts`. An image's URL never changes content, so reads are
 cached privately for a week.
 
-An admin uploads with `POST /images`, then adds the result to a series with
-`POST /series/{id}/images`. The first image becomes the primary. Series and seasons return a
+An admin uploads and attaches in one call, a multipart `POST /series/{id}/images` with the image in
+the `file` field, so an image is always in a catalog. If adding it fails after its files are written,
+the files are removed. The first image becomes the primary. Series and seasons return a
 resolved `cover`: the season's own choice, else the series primary, else null for a placeholder.
 
 Files are removed after the transaction commits, so a rollback never loses one. If removal fails,
