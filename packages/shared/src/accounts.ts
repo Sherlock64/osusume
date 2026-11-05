@@ -41,7 +41,7 @@ export type EmailSentResponse = z.infer<typeof emailSentResponseSchema>;
 const timestampSchema = z.iso.datetime();
 
 /** `mine` is the only scope outside the admin lists, so it can only be "true" or left out. */
-const mineQuerySchema = paginationQuerySchema.extend({
+export const mineQuerySchema = paginationQuerySchema.extend({
   mine: z.enum(['true']).optional(),
 });
 
