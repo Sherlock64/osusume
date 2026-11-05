@@ -35,6 +35,16 @@ async function loadCurrentUser(auth: Auth, headers: Headers): Promise<CurrentUse
   };
 }
 
+/** For a route that needs no session: whether the request happens to come from an admin. */
+export async function callerIsAdmin(auth: Auth, headers: Headers): Promise<boolean> {
+  try {
+    return (await loadCurrentUser(auth, headers)).role === 'admin';
+  } catch (error) {
+    if (error instanceof ApiError) return false;
+    throw error;
+  }
+}
+
 /**
  * Requires a logged-in, enabled user and sets `currentUser`. Pass as a route's `middleware`.
  * Reads the session and user from the database on every request (Better Auth's cookie

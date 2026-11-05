@@ -48,6 +48,13 @@ export async function assertEmailUnused(tx: Transaction, email: string): Promise
   }
 }
 
+/** Whether an error says what an address is: registered or banned. Only admins may see that. */
+export function isAddressRefusal(error: unknown): boolean {
+  return (
+    error instanceof ApiError && (error.code === 'email_blacklisted' || error.code === 'email_in_use')
+  );
+}
+
 /**
  * Creates an account with a verified email and a password. Better Auth's own sign-up is
  * off, so this is the only way in: first-run setup and accepted invites both prove the

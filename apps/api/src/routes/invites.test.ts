@@ -108,15 +108,40 @@ describe('POST /invite-requests', () => {
       409,
       'invite_already_open',
     );
+    expectError(
+      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
+      409,
+      'invite_refused',
+    );
   });
 
   it('refuses a second open invite: approved and unexpired', async () => {
     const { email } = await approvedInvite();
     expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
+      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: admin.cookie }),
       409,
       'invite_already_open',
     );
+    expectError(
+      await t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
+      409,
+      'invite_refused',
+    );
+  });
+
+  it('gives a member the same refusal for an account, a ban and an open invite', async () => {
+    const ask = (email: string) =>
+      t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie });
+    const banned = uniqueEmail('blacklisted');
+    await t.db.insert(emailBlacklist).values({ email: banned });
+    const bodies = [
+      await ask(banned),
+      await ask((await t.seedUser()).email),
+      await ask((await requestInvite()).email),
+    ];
+    expect(bodies.map((response) => response.status)).toEqual([409, 409, 409]);
+    expect(bodies[1]?.body).toEqual(bodies[0]?.body);
+    expect(bodies[2]?.body).toEqual(bodies[0]?.body);
   });
 
   it('allows a new request once the earlier one is rejected, revoked or expired', async () => {
@@ -444,14 +469,46 @@ describe('POST /invites/{token}/accept', () => {
   it('refuses when the email has been blacklisted since approval', async () => {
     const { email, token } = await approvedInvite();
     await t.db.insert(emailBlacklist).values({ email });
-    expectError(await accept(token), 409, 'email_blacklisted');
+    const dead = await accept(token);
+    expectError(dead, 404, 'invite_invalid');
+    expect(dead.body).toEqual((await accept('not-a-real-token')).body);
     expect(await t.db.select().from(user).where(eq(user.email, email))).toEqual([]);
   });
 
   it('refuses when the email has gained an account since approval', async () => {
     const { email, token } = await approvedInvite();
     await t.seedUser({ email });
-    expectError(await accept(token), 409, 'email_in_use');
+    const dead = await accept(token);
+    expectError(dead, 404, 'invite_invalid');
+    expect(dead.body).toEqual((await accept('not-a-real-token')).body);
+  });
+
+  it('tells a logged-in admin the specific reason', async () => {
+    const asAdmin = (token: string) =>
+      t.request(
+        'POST',
+        `/api/v1/invites/${encodeURIComponent(token)}/accept`,
+        { username: uniqueUsername('New'), password: PASSWORD },
+        { cookie: admin.cookie },
+      );
+    const banned = await approvedInvite();
+    await t.db.insert(emailBlacklist).values({ email: banned.email });
+    expectError(await asAdmin(banned.token), 409, 'email_blacklisted');
+    const taken = await approvedInvite();
+    await t.seedUser({ email: taken.email });
+    expectError(await asAdmin(taken.token), 409, 'email_in_use');
+  });
+
+  it('does not treat a member session as an admin one', async () => {
+    const { email, token } = await approvedInvite();
+    await t.seedUser({ email });
+    const response = await t.request(
+      'POST',
+      `/api/v1/invites/${encodeURIComponent(token)}/accept`,
+      { username: uniqueUsername('New'), password: PASSWORD },
+      { cookie: member.cookie },
+    );
+    expectError(response, 404, 'invite_invalid');
   });
 
   it.each([
@@ -581,7 +638,7 @@ describe('the email lock', () => {
           status: 'approved',
           expiresAt: new Date(Date.now() + 60_000),
         }),
-      () => t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
+      () => t.request('POST', '/api/v1/invite-requests', { email }, { cookie: admin.cookie }),
     );
     expectError(response, 409, 'invite_already_open');
   });
@@ -597,7 +654,7 @@ describe('the email lock', () => {
   it('makes an accept wait for a ban in progress', async () => {
     const { email, token } = await approvedInvite();
     const response = await callWhileLocked(email, blacklist(email), () => accept(token));
-    expectError(response, 409, 'email_blacklisted');
+    expectError(response, 404, 'invite_invalid');
     expect(await t.db.select().from(user).where(eq(user.email, email))).toEqual([]);
   });
 
@@ -614,7 +671,7 @@ describe('the email lock', () => {
     const response = await callWhileLocked(newEmail, blacklist(newEmail), () =>
       t.request('POST', '/api/v1/me/email/verify', { token }),
     );
-    expectError(response, 409, 'email_blacklisted');
+    expectError(response, 409, 'email_change_refused');
     const [row] = await t.db.select().from(user).where(eq(user.id, someone.id));
     expect(row?.email).toBe(someone.email);
   });

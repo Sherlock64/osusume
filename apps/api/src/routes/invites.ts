@@ -12,13 +12,13 @@ import {
   inviteRequestListQuerySchema,
   inviteRequestSchema,
   paginatedSchema,
-  type UserRole,
 } from '@osusume/shared';
 import { and, eq, or, sql } from 'drizzle-orm';
 import {
   assertEmailUnused,
   hashPassword,
   insertAccount,
+  isAddressRefusal,
   refusingTakenUsername,
   toAccount,
 } from '../auth/accounts.ts';
@@ -40,28 +40,16 @@ import {
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { requireAdmin, requireSession } from '../middleware/auth.ts';
+import { callerIsAdmin, requireAdmin, requireSession } from '../middleware/auth.ts';
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
+/** All a non-admin hears: nobody learns if an address is registered, banned or already invited. */
 const inviteRefused = () =>
   new ApiError(409, 'invite_refused', 'This email address cannot be invited.');
 const inviteNotFound = () => new ApiError(404, 'invite_not_found', 'No such invite request.');
 const inviteInvalid = () =>
   new ApiError(404, 'invite_invalid', 'This invite link is not valid or has expired.');
-
-/**
- * assertEmailUnused for the person asking. A member gets one refusal for both reasons, so
- * asking cannot reveal whether an address has an account or is banned. Admins see the reason.
- */
-async function assertRequestable(tx: Transaction, email: string, role: UserRole): Promise<void> {
-  try {
-    await assertEmailUnused(tx, email);
-  } catch (error) {
-    if (role !== 'admin' && error instanceof ApiError) throw inviteRefused();
-    throw error;
-  }
-}
 
 /** Hold the email's lock. Open: pending, or approved and not yet expired, accepted or revoked. */
 async function assertNoOpenInvite(tx: Transaction, email: string): Promise<void> {
@@ -242,7 +230,7 @@ export const inviteRoutes = createRouter()
     try {
       const created = await db.transaction(async (tx) => {
         await lockEmails(tx, email);
-        await assertRequestable(tx, email, role);
+        await assertEmailUnused(tx, email);
         await assertNoOpenInvite(tx, email);
         const [row] = await tx
           .insert(inviteRequest)
@@ -253,8 +241,14 @@ export const inviteRoutes = createRouter()
       });
       return c.json(toInviteRequest(created), 201);
     } catch (error) {
-      if (isUniqueViolation(error, 'invite_request_one_pending_per_email')) throw inviteOpen();
-      throw error;
+      const refusal = isUniqueViolation(error, 'invite_request_one_pending_per_email')
+        ? inviteOpen()
+        : error;
+      const aboutAddress =
+        isAddressRefusal(refusal) ||
+        (refusal instanceof ApiError && refusal.code === 'invite_already_open');
+      if (aboutAddress && role !== 'admin') throw inviteRefused();
+      throw refusal;
     }
   })
   .openapi(listMineRoute, async (c) => {
@@ -425,35 +419,44 @@ export const inviteRoutes = createRouter()
     if (!found) throw inviteInvalid();
     const passwordHash = await hashPassword(auth, password);
 
-    const created = await refusingTakenUsername(() =>
-      db.transaction(async (tx) => {
-        await lockEmails(tx, found.email);
-        const [row] = await tx
-          .select({ id: inviteRequest.id })
-          .from(inviteRequest)
-          .where(
-            and(
-              eq(inviteRequest.tokenHash, tokenHash),
-              eq(inviteRequest.status, 'approved'),
-              sql`${inviteRequest.expiresAt} > now()`,
-            ),
-          )
-          .for('update');
-        if (!row) throw inviteInvalid();
-        await assertEmailUnused(tx, found.email);
+    // A registered or banned address looks like any other dead link, except to an admin.
+    let created;
+    try {
+      created = await refusingTakenUsername(() =>
+        db.transaction(async (tx) => {
+          await lockEmails(tx, found.email);
+          const [row] = await tx
+            .select({ id: inviteRequest.id })
+            .from(inviteRequest)
+            .where(
+              and(
+                eq(inviteRequest.tokenHash, tokenHash),
+                eq(inviteRequest.status, 'approved'),
+                sql`${inviteRequest.expiresAt} > now()`,
+              ),
+            )
+            .for('update');
+          if (!row) throw inviteInvalid();
+          await assertEmailUnused(tx, found.email);
 
-        const account = await insertAccount(tx, {
-          username,
-          email: found.email,
-          passwordHash,
-          role: 'member',
-        });
-        await tx
-          .update(inviteRequest)
-          .set({ status: 'accepted', tokenHash: null })
-          .where(eq(inviteRequest.id, row.id));
-        return account;
-      }),
-    );
+          const account = await insertAccount(tx, {
+            username,
+            email: found.email,
+            passwordHash,
+            role: 'member',
+          });
+          await tx
+            .update(inviteRequest)
+            .set({ status: 'accepted', tokenHash: null })
+            .where(eq(inviteRequest.id, row.id));
+          return account;
+        }),
+      );
+    } catch (error) {
+      if (isAddressRefusal(error) && !(await callerIsAdmin(auth, c.req.raw.headers))) {
+        throw inviteInvalid();
+      }
+      throw error;
+    }
     return c.json(toAccount(created), 201);
   });

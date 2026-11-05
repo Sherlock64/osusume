@@ -332,22 +332,22 @@ describe('changing email', () => {
       (await t.db.select().from(inviteRequest).where(eq(inviteRequest.id, open?.id ?? '')))[0]?.status;
     expect(await pendingStatus()).toBe('pending');
     await t.db.insert(emailBlacklist).values({ email: newEmail });
-    expectError(await verify(token), 409, 'email_blacklisted');
+    expectError(await verify(token), 409, 'email_change_refused');
     expect(await pendingStatus()).toBe('pending');
   });
 
   it('refuses a used, unknown or expired link', async () => {
     const used = await started();
     expect((await verify(used.token)).status).toBe(200);
-    expectError(await verify(used.token), 404, 'token_invalid');
-    expectError(await verify('not-a-real-token'), 404, 'token_invalid');
+    expectError(await verify(used.token), 409, 'email_change_refused');
+    expectError(await verify('not-a-real-token'), 409, 'email_change_refused');
 
     const expired = await started();
     await t.db
       .update(emailChangeRequest)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(emailChangeRequest.userId, expired.member.id));
-    expectError(await verify(expired.token), 404, 'token_invalid');
+    expectError(await verify(expired.token), 409, 'email_change_refused');
     expect(await emailOf(expired.member.id)).toBe(expired.member.email);
   });
 
@@ -356,7 +356,7 @@ describe('changing email', () => {
     const another = uniqueEmail('changed-again');
     expect((await start(member.cookie, another)).status).toBe(202);
     const newest = tokenFrom(await waitForMail(another));
-    expectError(await verify(token), 404, 'token_invalid');
+    expectError(await verify(token), 409, 'email_change_refused');
     expect((await verify(newest)).status).toBe(200);
     expect(await emailOf(member.id)).toBe(another);
   });
@@ -364,24 +364,49 @@ describe('changing email', () => {
   it('refuses an address in use or blacklisted, ignoring case', async () => {
     const member = await t.seedLoggedIn();
     const other = await t.seedUser();
-    expectError(await start(member.cookie, other.email.toUpperCase()), 409, 'email_in_use');
-    expectError(await start(member.cookie, member.email), 409, 'email_in_use');
+    const taken = await start(member.cookie, other.email.toUpperCase());
+    expectError(taken, 409, 'email_change_refused');
+    expectError(await start(member.cookie, member.email), 409, 'email_change_refused');
     const banned = uniqueEmail('banned');
     await t.db.insert(emailBlacklist).values({ email: banned });
-    expectError(await start(member.cookie, banned.toUpperCase()), 409, 'email_blacklisted');
+    const refused = await start(member.cookie, banned.toUpperCase());
+    expect(refused.body).toEqual(taken.body);
     expect(await mailsTo(banned)).toEqual([]);
+  });
+
+  it('tells an admin the specific reason when asking', async () => {
+    const asking = await t.seedLoggedIn({ role: 'admin' });
+    const other = await t.seedUser();
+    expectError(await start(asking.cookie, other.email), 409, 'email_in_use');
+    const banned = uniqueEmail('banned');
+    await t.db.insert(emailBlacklist).values({ email: banned });
+    expectError(await start(asking.cookie, banned), 409, 'email_blacklisted');
   });
 
   it('refuses at click time when the address has been taken or blacklisted since', async () => {
     const taken = await started();
     await t.seedUser({ email: taken.newEmail });
-    expectError(await verify(taken.token), 409, 'email_in_use');
+    const refused = await verify(taken.token);
+    expectError(refused, 409, 'email_change_refused');
+    expect(refused.body).toEqual((await verify('not-a-real-token')).body);
     expect(await emailOf(taken.member.id)).toBe(taken.member.email);
 
     const banned = await started();
     await t.db.insert(emailBlacklist).values({ email: banned.newEmail });
-    expectError(await verify(banned.token), 409, 'email_blacklisted');
+    expectError(await verify(banned.token), 409, 'email_change_refused');
     expect(await emailOf(banned.member.id)).toBe(banned.member.email);
+  });
+
+  it('tells a logged-in admin the specific reason at click time', async () => {
+    const asAdmin = (token: string) =>
+      t.request('POST', '/api/v1/me/email/verify', { token }, { cookie: admin.cookie });
+    const taken = await started();
+    await t.seedUser({ email: taken.newEmail });
+    expectError(await asAdmin(taken.token), 409, 'email_in_use');
+    const banned = await started();
+    await t.db.insert(emailBlacklist).values({ email: banned.newEmail });
+    expectError(await asAdmin(banned.token), 409, 'email_blacklisted');
+    expectError(await asAdmin('not-a-real-token'), 404, 'token_invalid');
   });
 
   it('gives an address to one of two people clicking at the same time', async () => {

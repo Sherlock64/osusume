@@ -231,7 +231,7 @@ describe('disable and enable', () => {
     await act(member.id, 'disable');
 
     expect((await t.request('POST', '/api/auth/reset-password', { token: resetToken, newPassword: 'another password' })).status).toBe(400);
-    expectError(await t.request('POST', '/api/v1/me/email/verify', { token: emailToken }), 404, 'token_invalid');
+    expectError(await t.request('POST', '/api/v1/me/email/verify', { token: emailToken }), 409, 'email_change_refused');
     expect(await t.db.select().from(emailChangeRequest).where(eq(emailChangeRequest.userId, member.id))).toEqual([]);
 
     await t.request('POST', '/api/auth/request-password-reset', { email: member.email });

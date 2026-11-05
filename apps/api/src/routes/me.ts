@@ -13,6 +13,7 @@ import {
   clearSessionCookie,
   deletePasswordResetTokens,
   firstAdminProtected,
+  isAddressRefusal,
   removeUser,
   toAccount,
 } from '../auth/accounts.ts';
@@ -32,12 +33,19 @@ import {
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { requireSessionForPasswordCheck } from '../middleware/auth.ts';
+import { callerIsAdmin, requireSessionForPasswordCheck } from '../middleware/auth.ts';
 
 const EMAIL_CHANGE_LINK_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
 const tokenInvalid = () =>
   new ApiError(404, 'token_invalid', 'This link is not valid or has expired.');
+
+/**
+ * All a non-admin hears when asking for an email change or using its link, for an address that
+ * is registered or banned and, on the link, for a dead link too.
+ */
+const emailChangeRefused = () =>
+  new ApiError(409, 'email_change_refused', 'This email change cannot be completed.');
 
 const deleteAccountRoute = createRoute({
   method: 'delete',
@@ -122,28 +130,33 @@ export const meRoutes = createRouter()
       tokenHash: hashToken(token),
       expiresAt: new Date(Date.now() + EMAIL_CHANGE_LINK_LIFETIME_MS),
     };
-    await db.transaction(async (tx) => {
-      await lockEmails(tx, newEmail);
-      await assertEmailUnused(tx, newEmail);
-      await tx
-        .insert(emailChangeRequest)
-        .values({ userId, ...values })
-        .onConflictDoUpdate({ target: emailChangeRequest.userId, set: values });
-      await sendOrFail(mailer, emailChangeMail(publicBaseUrl, newEmail, token));
-    });
+    try {
+      await db.transaction(async (tx) => {
+        await lockEmails(tx, newEmail);
+        await assertEmailUnused(tx, newEmail);
+        await tx
+          .insert(emailChangeRequest)
+          .values({ userId, ...values })
+          .onConflictDoUpdate({ target: emailChangeRequest.userId, set: values });
+        await sendOrFail(mailer, emailChangeMail(publicBaseUrl, newEmail, token));
+      });
+    } catch (error) {
+      if (isAddressRefusal(error) && c.var.currentUser.role !== 'admin') throw emailChangeRefused();
+      throw error;
+    }
     return c.json({ status: 'email_sent' as const }, 202);
   })
   .openapi(verifyEmailChangeRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, auth } = c.var.deps;
     const tokenHash = hashToken(c.req.valid('json').token);
 
-    const [found] = await db
-      .select({ userId: emailChangeRequest.userId })
-      .from(emailChangeRequest)
-      .where(eq(emailChangeRequest.tokenHash, tokenHash));
-    if (!found) throw tokenInvalid();
-
     try {
+      const [found] = await db
+        .select({ userId: emailChangeRequest.userId })
+        .from(emailChangeRequest)
+        .where(eq(emailChangeRequest.tokenHash, tokenHash));
+      if (!found) throw tokenInvalid();
+
       const updated = await db.transaction(async (tx) => {
         const [current] = await tx
           .select()
@@ -199,9 +212,13 @@ export const meRoutes = createRouter()
       });
       return c.json(toAccount(updated), 200);
     } catch (error) {
-      if (isUniqueViolation(error, 'user_email_unique')) {
-        throw new ApiError(409, 'email_in_use', 'An account already uses this email address.');
-      }
-      throw error;
+      const refusal = isUniqueViolation(error, 'user_email_unique')
+        ? new ApiError(409, 'email_in_use', 'An account already uses this email address.')
+        : error;
+      const hidden =
+        isAddressRefusal(refusal) ||
+        (refusal instanceof ApiError && refusal.code === 'token_invalid');
+      if (hidden && !(await callerIsAdmin(auth, c.req.raw.headers))) throw emailChangeRefused();
+      throw refusal;
     }
   });
