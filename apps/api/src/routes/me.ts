@@ -143,6 +143,10 @@ export const meRoutes = createRouter()
 
     await assertCurrentPassword({ db, auth }, userId, currentPassword);
 
+    // Outside the transaction, so a refusal cancels it too. Were an earlier link to survive only
+    // a refusal, using it would show whether this address was refused.
+    await db.delete(emailChangeRequest).where(eq(emailChangeRequest.userId, userId));
+
     const isAdmin = c.var.currentUser.role === 'admin';
     const token = generateToken();
     const tokenHash = hashToken(token);

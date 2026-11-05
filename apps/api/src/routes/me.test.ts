@@ -399,6 +399,48 @@ describe('changing email', () => {
     });
   });
 
+  describe('a new attempt cancels the earlier link', () => {
+    /** A member with a live link to an address they control, as a prober would set up. */
+    async function withEarlierLink() {
+      const member = await t.seedLoggedIn();
+      const own = uniqueEmail('own');
+      expectCompleted(await start(member.cookie, own));
+      return { member, own, earlier: tokenFrom(await waitForMail(own)) };
+    }
+
+    it.each<[string, () => Promise<string>]>([
+      ['in use', async () => (await t.seedUser()).email],
+      ['blacklisted', async () => {
+        const banned = uniqueEmail('banned');
+        await t.db.insert(emailBlacklist).values({ email: banned });
+        return banned;
+      }],
+      ['free', () => Promise.resolve(uniqueEmail('free'))],
+    ])('so using it cannot show that the address asked for was %s', async (_label, make) => {
+      const { member, earlier } = await withEarlierLink();
+      expectCompleted(await start(member.cookie, await make()));
+      expectCompleted(await verify(earlier));
+      expect(await emailOf(member.id)).toBe(member.email);
+    });
+
+    it('also for an admin who is refused', async () => {
+      const asking = await t.seedLoggedIn({ role: 'admin' });
+      const own = uniqueEmail('own');
+      expectCompleted(await start(asking.cookie, own));
+      const earlier = tokenFrom(await waitForMail(own));
+      expectError(await start(asking.cookie, (await t.seedUser()).email), 409, 'email_in_use');
+      expectCompleted(await verify(earlier));
+      expect(await emailOf(asking.id)).toBe(asking.email);
+    });
+
+    it('but not with a wrong password', async () => {
+      const { member, own, earlier } = await withEarlierLink();
+      expectError(await start(member.cookie, uniqueEmail('unsent'), 'wrong password'), 403, 'invalid_password');
+      expectCompleted(await verify(earlier));
+      expect(await emailOf(member.id)).toBe(own);
+    });
+  });
+
   it('still reports a wrong password, and a malformed address', async () => {
     const member = await t.seedLoggedIn();
     expectError(await start(member.cookie, (await t.seedUser()).email, 'wrong password'), 403, 'invalid_password');

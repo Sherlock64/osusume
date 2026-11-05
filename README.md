@@ -65,7 +65,7 @@ invite: a refused address creates no row and sends nothing, and only the admin q
 `POST /me/email`, once the password is correct, and `POST /me/email/verify` always answer a
 non-admin "Request completed", whatever happened. So that timing or a failed send does not tell the
 two apart, a non-admin's link is sent after the response; a send failure is logged and drops the
-link. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
+link. Any attempt with the correct password cancels the earlier pending link, refused or not. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
 and rate limiting are still reported to everyone.
 
 Any invite link that cannot be used gets one identical answer from `GET /invites/{token}` and
