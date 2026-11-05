@@ -73,6 +73,7 @@ export function createAuth({ db, secret, publicBaseUrl, mailer }: AuthOptions) {
       minPasswordLength: PASSWORD_MIN_LENGTH,
       maxPasswordLength: PASSWORD_MAX_LENGTH,
       revokeSessionsOnPasswordReset: true,
+      resetPasswordTokenExpiresIn: 60 * 60,
       // Not awaited: the time an SMTP send takes would reveal whether the account exists.
       sendResetPassword: ({ user: target, token }) => {
         void (async () => {

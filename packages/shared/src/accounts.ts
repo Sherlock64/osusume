@@ -11,7 +11,7 @@ export const INVITE_LIFETIME_DAYS = 7;
 
 export const USERNAME_MIN_LENGTH = 3;
 export const USERNAME_MAX_LENGTH = 30;
-export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MIN_LENGTH = 12;
 export const PASSWORD_MAX_LENGTH = 128;
 
 /** The characters Better Auth's username login accepts. Keeps the capitalization entered. */
@@ -99,6 +99,16 @@ export const adminInviteRequestSchema = inviteRequestSchema.extend({
 });
 export type AdminInviteRequest = z.infer<typeof adminInviteRequestSchema>;
 
+/**
+ * What an invite link shows before submit. Any link that cannot be accepted, for whatever
+ * reason, gets the same answer: no email and `valid: false`.
+ */
+export const invitePreviewSchema = z.object({
+  valid: z.boolean(),
+  email: z.string().nullable(),
+});
+export type InvitePreview = z.infer<typeof invitePreviewSchema>;
+
 export const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']) });
 export type Decision = z.infer<typeof decisionSchema>;
 
@@ -115,6 +125,11 @@ export const changeEmailSchema = z.object({
   newEmail: emailSchema,
 });
 export type ChangeEmail = z.infer<typeof changeEmailSchema>;
+
+export const deleteAccountSchema = z.object({
+  currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
+});
+export type DeleteAccount = z.infer<typeof deleteAccountSchema>;
 
 /* Username changes */
 

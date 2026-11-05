@@ -27,8 +27,9 @@ describe('emailSchema', () => {
 
 describe('passwordSchema', () => {
   it('holds to the length limits', () => {
-    expect(passwordSchema.safeParse('1234567').success).toBe(false);
-    expect(passwordSchema.safeParse('12345678').success).toBe(true);
+    expect(passwordSchema.safeParse('a'.repeat(11)).success).toBe(false);
+    expect(passwordSchema.safeParse('a'.repeat(12)).success).toBe(true);
+    expect(passwordSchema.safeParse('a'.repeat(128)).success).toBe(true);
     expect(passwordSchema.safeParse('a'.repeat(129)).success).toBe(false);
   });
 });

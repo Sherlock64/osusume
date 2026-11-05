@@ -99,19 +99,79 @@ describe('every action', () => {
     expect((await t.request('GET', '/api/v1/admin/users?limit=1', undefined, { cookie: first.cookie })).status).toBe(200);
   });
 
-  it.each(actions)('%s refuses your own account', async (action) => {
-    const self = await t.seedLoggedIn({ role: 'admin' });
-    expectError(await act(self.id, action, self.cookie), 403, 'cannot_target_self');
-    const [row] = await t.db.select().from(user).where(eq(user.id, self.id));
-    expect(row).toMatchObject({ role: 'admin', disabledAt: null });
-  });
-
   it.each(actions)('%s answers 404 for an unknown user', async (action) => {
     expectError(await act('00000000-0000-4000-8000-000000000000', action), 404, 'user_not_found');
   });
 
   it.each(actions)('%s answers 400 for a malformed id', async (action) => {
     expectError(await act('not-a-uuid', action), 400, 'validation_error');
+  });
+});
+
+describe('acting on your own account', () => {
+  const stillRefused = async (cookie: string) => {
+    expectError(await t.request('GET', '/api/v1/admin/users', undefined, { cookie }), 401, 'unauthenticated');
+    expect((await t.request('GET', '/api/auth/get-session', undefined, { cookie })).body).toBeNull();
+  };
+
+  it('promote and enable are harmless no-ops', async () => {
+    const self = await t.seedLoggedIn({ role: 'admin' });
+    expect((await act(self.id, 'promote', self.cookie)).body).toMatchObject({ role: 'admin' });
+    expect((await act(self.id, 'enable', self.cookie)).body).toMatchObject({ disabledAt: null });
+  });
+
+  it('demote: applies at once and the session stays, as a member', async () => {
+    const self = await t.seedLoggedIn({ role: 'admin' });
+    const response = await act(self.id, 'demote', self.cookie);
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ role: 'member' });
+    expectError(await t.request('GET', '/api/v1/admin/users', undefined, { cookie: self.cookie }), 403, 'admin_required');
+    expect((await t.request('GET', '/api/v1/invite-requests', undefined, { cookie: self.cookie })).status).toBe(200);
+  });
+
+  it('disable: answers cleanly, with the session gone and login refused', async () => {
+    const self = await t.seedLoggedIn({ role: 'admin' });
+    const response = await act(self.id, 'disable', self.cookie);
+    expect(response.status).toBe(200);
+    expect(response.body).toMatchObject({ disabledAt: expect.any(String) as string });
+    expect(response.headers.get('set-cookie')).toContain('better-auth.session_token=;');
+    await stillRefused(self.cookie);
+    expect(await canLogin(self.username)).toBe(403);
+    expect((await act(self.id, 'enable')).status).toBe(200);
+    expect(await canLogin(self.username)).toBe(200);
+  });
+
+  it.each(['remove', 'ban'])('%s: answers cleanly, with the account and session gone', async (action) => {
+    const errors = vi.spyOn(console, 'error');
+    const self = await t.seedLoggedIn({ role: 'admin' });
+    const response = await act(self.id, action, self.cookie);
+    expect(response.status).toBe(204);
+    expect(response.body).toBe('');
+    expect(response.headers.get('set-cookie')).toContain('better-auth.session_token=;');
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+
+    expect(await t.db.select().from(user).where(eq(user.id, self.id))).toEqual([]);
+    expect(await t.db.select().from(session).where(eq(session.userId, self.id))).toEqual([]);
+    await stillRefused(self.cookie);
+    expect(await canLogin(self.username)).toBe(401);
+
+    const blacklisted = await t.db.select().from(emailBlacklist).where(eq(emailBlacklist.email, self.email));
+    if (action === 'ban') {
+      // Banned by themselves, who no longer exists, so the identity is blanked.
+      expect(blacklisted).toHaveLength(1);
+      expect(blacklisted[0]?.bannedBy).toBeNull();
+    } else {
+      expect(blacklisted).toEqual([]);
+    }
+  });
+
+  it('does not clear the cookie of an admin acting on someone else', async () => {
+    const target = await t.seedUser();
+    const response = await act(target.id, 'remove');
+    expect(response.status).toBe(204);
+    expect(response.headers.get('set-cookie')).toBeNull();
+    expect((await t.request('GET', '/api/v1/admin/users?limit=1', undefined, { cookie: admin.cookie })).status).toBe(200);
   });
 });
 
@@ -348,6 +408,9 @@ describe('an address wanted by both an email change and an invite', () => {
       }),
     ]);
 
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409].sort());
+    // Whichever goes first decides: the change revokes the invite, or the account takes the address.
+    const [changed, accepted] = responses.map((response) => response.status);
+    expect([[200, 404], [409, 201]]).toContainEqual([changed, accepted]);
+    expect(await t.db.select().from(user).where(eq(user.email, contested))).toHaveLength(1);
   });
 });

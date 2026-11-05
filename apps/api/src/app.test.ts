@@ -67,6 +67,7 @@ describe('OpenAPI document', () => {
       '/health',
       '/health/ready',
       '/invite-requests',
+      '/invites/{token}',
       '/invites/{token}/accept',
       '/me',
       '/me/email',

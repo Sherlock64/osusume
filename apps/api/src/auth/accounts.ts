@@ -1,5 +1,7 @@
 import { type UserRole, usernameKey } from '@osusume/shared';
 import { and, eq, sql } from 'drizzle-orm';
+import type { Context } from 'hono';
+import { deleteCookie } from 'hono/cookie';
 import type { Database, Transaction } from '../db/client.ts';
 import { account, emailBlacklist, user, verification } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
@@ -96,43 +98,52 @@ export async function refusingTakenUsername<Result>(run: () => Promise<Result>):
 export const usernameTaken = () =>
   new ApiError(409, 'username_taken', 'This username is taken.');
 
-/** An admin action must be on another account that is not the first admin. */
-export function assertAdminActionAllowed(
-  target: { id: string; isFirstAdmin: boolean },
-  actorId: string,
-): void {
-  if (target.isFirstAdmin) throw firstAdminProtected();
-  if (target.id === actorId) {
-    throw new ApiError(403, 'cannot_target_self', 'Admins cannot do this to their own account.');
-  }
-}
-
 /**
  * Removes an account, the one path behind remove, ban and self-deletion. The foreign keys
- * and user_before_delete do the rest (see src/db/schema.ts). `admin` is who is acting when
- * it is not the user themselves; `ban` also blacklists the current email, in one transaction.
+ * and user_before_delete do the rest (see src/db/schema.ts). `bannedBy` also blacklists the
+ * current email, in one transaction.
  */
 export async function removeUser(
   db: Database,
   userId: string,
-  options: { admin?: string; ban?: boolean } = {},
+  options: { bannedBy?: string } = {},
 ): Promise<void> {
-  const { admin, ban = false } = options;
+  const { bannedBy } = options;
   await db.transaction(async (tx) => {
     const [target] = await tx.select().from(user).where(eq(user.id, userId)).for('update');
     if (!target) throw new ApiError(404, 'user_not_found', 'No such user.');
     if (target.isFirstAdmin) throw firstAdminProtected();
-    if (admin !== undefined) assertAdminActionAllowed(target, admin);
 
     await lockEmails(tx, target.email);
-    if (ban) {
+    if (bannedBy !== undefined) {
       await tx
         .insert(emailBlacklist)
-        .values({ email: target.email.toLowerCase(), bannedBy: admin })
+        .values({ email: target.email.toLowerCase(), bannedBy })
         .onConflictDoNothing();
     }
     await tx.delete(user).where(eq(user.id, userId));
   });
+}
+
+/** Tells the browser to drop the session cookie, once the session itself is gone. */
+export async function clearSessionCookie(c: Context, auth: AppDependencies['auth']): Promise<void> {
+  const { sessionToken } = (await auth.$context).authCookies;
+  // Secure must match: over HTTPS the name has the __Secure- prefix, which requires it.
+  deleteCookie(c, sessionToken.name, {
+    path: sessionToken.attributes.path ?? '/',
+    ...(sessionToken.attributes.secure === true ? { secure: true } : {}),
+  });
+}
+
+/** Refuses a wrong current password. Use on a route with requireSessionForPasswordCheck. */
+export async function assertCurrentPassword(
+  deps: Pick<AppDependencies, 'db' | 'auth'>,
+  userId: string,
+  password: string,
+): Promise<void> {
+  if (!(await verifyCurrentPassword(deps, userId, password))) {
+    throw new ApiError(403, 'invalid_password', 'The current password is not correct.');
+  }
 }
 
 /** Verifies a user's current password against their credential account. */

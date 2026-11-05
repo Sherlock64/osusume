@@ -450,11 +450,87 @@ describe('POST /invites/{token}/accept', () => {
   });
 
   it.each([
-    ['a short password', { username: 'valid_name', password: 'short' }],
+    ['an 11-character password', { username: 'valid_name', password: 'a'.repeat(11) }],
+    ['a 129-character password', { username: 'valid_name', password: 'a'.repeat(129) }],
     ['a bad username', { username: 'no spaces', password: PASSWORD }],
   ])('refuses %s', async (_label, body) => {
     const { token } = await approvedInvite();
     expectError(await t.request('POST', `/api/v1/invites/${encodeURIComponent(token)}/accept`, body), 400, 'validation_error');
+  });
+});
+
+describe('GET /invites/{token}', () => {
+  const INVALID = { valid: false, email: null };
+  const preview = (token: string) =>
+    t.request('GET', `/api/v1/invites/${encodeURIComponent(token)}`);
+
+  it('shows the fixed email of a valid link, with no login and no caching', async () => {
+    const { email, token } = await approvedInvite();
+    const response = await preview(token);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ valid: true, email });
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+
+  it('does not consume the link', async () => {
+    const { email, token } = await approvedInvite();
+    await preview(token);
+    await preview(token);
+    expect((await preview(token)).body).toEqual({ valid: true, email });
+    expect((await accept(token)).status).toBe(201);
+  });
+
+  it('gives the same answer for every link that cannot be accepted', async () => {
+    const unknown = await preview('not-a-real-token');
+    expect(unknown.status).toBe(200);
+    expect(unknown.body).toEqual(INVALID);
+
+    const expired = await approvedInvite();
+    await t.db
+      .update(inviteRequest)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(inviteRequest.id, expired.id));
+
+    const revoked = await approvedInvite();
+    await t.request('POST', `/api/v1/admin/invite-requests/${revoked.id}/revoke`, undefined, {
+      cookie: admin.cookie,
+    });
+
+    const used = await approvedInvite();
+    expect((await accept(used.token)).status).toBe(201);
+
+    const blacklisted = await approvedInvite();
+    await t.db.insert(emailBlacklist).values({ email: blacklisted.email });
+
+    const registered = await approvedInvite();
+    await t.seedUser({ email: registered.email });
+
+    // Revoked by the requester's removal: the status changes but the hash stays.
+    const someone = await t.seedLoggedIn();
+    const orphanEmail = uniqueEmail('orphan');
+    const created = await t.request('POST', '/api/v1/invite-requests', { email: orphanEmail }, { cookie: someone.cookie });
+    await decide((created.body as Created).id, 'approve');
+    const orphanToken = tokenFrom(await waitForMail(orphanEmail));
+    await t.db.delete(user).where(eq(user.id, someone.id));
+
+    for (const token of [
+      expired.token,
+      revoked.token,
+      used.token,
+      blacklisted.token,
+      registered.token,
+      orphanToken,
+    ]) {
+      const response = await preview(token);
+      expect(response.status).toBe(200);
+      expect(response.body).toEqual(INVALID);
+    }
+  });
+
+  it('says invalid for a request not yet approved, which has no link', async () => {
+    const { id } = await requestInvite();
+    expect((await rowOf(id))?.tokenHash).toBeNull();
+    expect((await preview(id)).body).toEqual(INVALID);
   });
 });
 

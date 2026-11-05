@@ -2,18 +2,19 @@ import { createRoute } from '@hono/zod-openapi';
 import {
   accountSchema,
   changeEmailSchema,
+  deleteAccountSchema,
   emailSentResponseSchema,
   tokenBodySchema,
 } from '@osusume/shared';
-import { and, eq, gt, sql } from 'drizzle-orm';
-import { deleteCookie } from 'hono/cookie';
+import { and, eq, gt, or, sql } from 'drizzle-orm';
 import {
+  assertCurrentPassword,
   assertEmailUnused,
+  clearSessionCookie,
   deletePasswordResetTokens,
   firstAdminProtected,
   removeUser,
   toAccount,
-  verifyCurrentPassword,
 } from '../auth/accounts.ts';
 import { emailChangeMail } from '../auth/emails.ts';
 import { emailChangeRequest, inviteRequest, user } from '../db/schema.ts';
@@ -26,11 +27,12 @@ import {
   emailFailed,
   invalidRequest,
   notFound,
+  rateLimited,
   sessionSecurity,
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { requireSession } from '../middleware/auth.ts';
+import { requireSessionForPasswordCheck } from '../middleware/auth.ts';
 
 const EMAIL_CHANGE_LINK_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -40,12 +42,17 @@ const tokenInvalid = () =>
 const deleteAccountRoute = createRoute({
   method: 'delete',
   path: '/me',
-  summary: 'Delete your own account. Same effect as being removed',
+  summary: 'Delete your own account, given the current password. Same effect as being removed',
   security: sessionSecurity,
-  middleware: requireSession,
+  middleware: requireSessionForPasswordCheck,
+  request: {
+    body: { required: true, content: { 'application/json': { schema: deleteAccountSchema } } },
+  },
   responses: {
     204: { description: 'The account was deleted' },
+    ...invalidRequest,
     ...unauthenticated,
+    ...rateLimited,
   },
 });
 
@@ -54,7 +61,7 @@ const requestEmailChangeRoute = createRoute({
   path: '/me/email',
   summary: 'Start changing your email: emails a verification link to the new address',
   security: sessionSecurity,
-  middleware: requireSession,
+  middleware: requireSessionForPasswordCheck,
   request: {
     body: { required: true, content: { 'application/json': { schema: changeEmailSchema } } },
   },
@@ -66,6 +73,7 @@ const requestEmailChangeRoute = createRoute({
     ...invalidRequest,
     ...unauthenticated,
     ...conflict,
+    ...rateLimited,
     ...emailFailed,
   },
 });
@@ -95,13 +103,10 @@ export const meRoutes = createRouter()
   .openapi(deleteAccountRoute, async (c) => {
     const { db, auth } = c.var.deps;
     if (c.var.currentUser.isFirstAdmin) throw firstAdminProtected();
+    const { currentPassword } = c.req.valid('json');
+    await assertCurrentPassword({ db, auth }, c.var.currentUser.id, currentPassword);
     await removeUser(db, c.var.currentUser.id);
-    const { sessionToken } = (await auth.$context).authCookies;
-    // Secure must match: over HTTPS the name has the __Secure- prefix, which requires it.
-    deleteCookie(c, sessionToken.name, {
-      path: sessionToken.attributes.path ?? '/',
-      ...(sessionToken.attributes.secure === true ? { secure: true } : {}),
-    });
+    await clearSessionCookie(c, auth);
     return c.body(null, 204);
   })
   .openapi(requestEmailChangeRoute, async (c) => {
@@ -109,9 +114,7 @@ export const meRoutes = createRouter()
     const { currentPassword, newEmail } = c.req.valid('json');
     const userId = c.var.currentUser.id;
 
-    if (!(await verifyCurrentPassword({ db, auth }, userId, currentPassword))) {
-      throw new ApiError(403, 'invalid_password', 'The current password is not correct.');
-    }
+    await assertCurrentPassword({ db, auth }, userId, currentPassword);
 
     const token = generateToken();
     const values = {
@@ -179,6 +182,19 @@ export const meRoutes = createRouter()
           .delete(inviteRequest)
           .where(sql`lower(${inviteRequest.inviteeEmail}) = lower(${current.email})`);
         await deletePasswordResetTokens(tx, current.id);
+        // The address now has an account, so nothing open for it may be accepted.
+        await tx
+          .update(inviteRequest)
+          .set({ status: 'revoked', tokenHash: null })
+          .where(
+            and(
+              sql`lower(${inviteRequest.inviteeEmail}) = lower(${request.newEmail})`,
+              or(
+                eq(inviteRequest.status, 'pending'),
+                and(eq(inviteRequest.status, 'approved'), sql`${inviteRequest.expiresAt} > now()`),
+              ),
+            ),
+          );
         return row;
       });
       return c.json(toAccount(updated), 200);

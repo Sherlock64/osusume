@@ -97,6 +97,26 @@ describe('password reset', () => {
     }
   });
 
+  it('gives the link one hour', async () => {
+    const member = await t.seedUser();
+    await requestReset(member.email);
+    await waitForMail(member.email);
+    const [row] = await t.db.select().from(verification).where(eq(verification.value, member.id));
+    const minutes = ((row?.expiresAt.getTime() ?? 0) - Date.now()) / 60_000;
+    expect(minutes).toBeGreaterThan(59);
+    expect(minutes).toBeLessThanOrEqual(60);
+  });
+
+  it('holds to the password length limits', async () => {
+    const member = await t.seedUser();
+    await requestReset(member.email);
+    const token = tokenFrom(await waitForMail(member.email));
+    expect((await reset(token, 'a'.repeat(11))).status).toBe(400);
+    expect((await reset(token, 'a'.repeat(129))).status).toBe(400);
+    expect((await reset(token, 'a'.repeat(12))).status).toBe(200);
+    expect(await canLogin(member.username, 'a'.repeat(12))).toBe(true);
+  });
+
   it('works once and stores no raw token', async () => {
     const member = await t.seedUser();
     await requestReset(member.email);
@@ -141,6 +161,35 @@ describe('changing password while logged in', () => {
     });
     expect(response.status).toBe(400);
     expect(await canLogin(member.username, PASSWORD)).toBe(true);
+  });
+
+  it('holds to the password length limits', async () => {
+    const member = await t.seedLoggedIn();
+    for (const newPassword of ['a'.repeat(11), 'a'.repeat(129)]) {
+      const response = await change(member.cookie, { currentPassword: PASSWORD, newPassword });
+      expect(response.status).toBe(400);
+    }
+    expect(await canLogin(member.username, PASSWORD)).toBe(true);
+    const accepted = await change(member.cookie, {
+      currentPassword: PASSWORD,
+      newPassword: 'a'.repeat(12),
+    });
+    expect(accepted.status).toBe(200);
+  });
+
+  it('is rate limited', async () => {
+    const member = await t.seedLoggedIn();
+    const statuses = [];
+    for (let i = 0; i < 4; i += 1) {
+      const response = await t.request(
+        'POST',
+        '/api/auth/change-password',
+        { currentPassword: 'wrong password', newPassword: NEW_PASSWORD },
+        { cookie: member.cookie, ip: '192.0.2.20' },
+      );
+      statuses.push(response.status);
+    }
+    expect(statuses).toEqual([400, 400, 400, 429]);
   });
 
   it('changes the password', async () => {
@@ -200,10 +249,91 @@ describe('changing email', () => {
     await t.login(member.enteredUsername);
   });
 
-  it('stores the token only as a hash', async () => {
+  it('stores the token only as a hash and gives the link 24 hours', async () => {
     const { member, token } = await started();
     const [row] = await t.db.select().from(emailChangeRequest).where(eq(emailChangeRequest.userId, member.id));
     expect(row?.tokenHash).toBe(hashToken(token));
+    const hours = ((row?.expiresAt.getTime() ?? 0) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(23.9);
+    expect(hours).toBeLessThanOrEqual(24);
+  });
+
+  it('is rate limited per user, whatever the client address', async () => {
+    const member = await t.seedLoggedIn();
+    const attempt = () => start(member.cookie, uniqueEmail('limited'), 'wrong password');
+    expectError(await attempt(), 403, 'invalid_password');
+    expectError(await attempt(), 403, 'invalid_password');
+    expectError(await attempt(), 403, 'invalid_password');
+    const limited = await attempt();
+    expectError(limited, 429, 'rate_limited');
+    expect(Number(limited.headers.get('x-retry-after'))).toBeGreaterThan(0);
+    // The right password is refused too while limited, so guessing gains nothing.
+    expectError(await start(member.cookie, uniqueEmail('limited')), 429, 'rate_limited');
+
+    const other = await t.seedLoggedIn();
+    expect((await start(other.cookie, uniqueEmail('unlimited'))).status).toBe(202);
+  });
+
+  it('revokes open invites for the new address when it applies, and goes through', async () => {
+    const { member, newEmail, token } = await started();
+    const [pending, approved, expired, rejected] = await t.db
+      .insert(inviteRequest)
+      .values([
+        { requesterId: admin.id, inviteeEmail: newEmail, status: 'pending' },
+        {
+          requesterId: admin.id,
+          inviteeEmail: newEmail.toUpperCase(),
+          status: 'approved',
+          tokenHash: hashToken('open-for-new-address'),
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+        {
+          requesterId: admin.id,
+          inviteeEmail: newEmail,
+          status: 'approved',
+          tokenHash: hashToken('expired-for-new-address'),
+          expiresAt: new Date(Date.now() - 60_000),
+        },
+        { requesterId: admin.id, inviteeEmail: newEmail, status: 'rejected' },
+      ])
+      .returning();
+
+    expect((await verify(token)).status).toBe(200);
+
+    expect(await emailOf(member.id)).toBe(newEmail);
+    const statusOf = async (id: string | undefined) => {
+      const [row] = await t.db.select().from(inviteRequest).where(eq(inviteRequest.id, id ?? ''));
+      return row;
+    };
+    expect(await statusOf(pending?.id)).toMatchObject({ status: 'revoked' });
+    expect(await statusOf(approved?.id)).toMatchObject({ status: 'revoked', tokenHash: null });
+    expect(await statusOf(expired?.id)).toMatchObject({ status: 'approved' });
+    expect(await statusOf(rejected?.id)).toMatchObject({ status: 'rejected' });
+    expect(
+      (await t.request('GET', `/api/v1/invites/open-for-new-address`)).body,
+    ).toEqual({ valid: false, email: null });
+    expectError(
+      await t.request('POST', '/api/v1/invites/open-for-new-address/accept', {
+        username: 'too_late_now',
+        password: PASSWORD,
+      }),
+      404,
+      'invite_invalid',
+    );
+  });
+
+  it('leaves open invites for the new address alone until it applies, and if refused', async () => {
+    const { newEmail, token } = await started();
+    const [open] = await t.db
+      .insert(inviteRequest)
+      .values({ requesterId: admin.id, inviteeEmail: newEmail, status: 'pending' })
+      .returning();
+    const pendingStatus = async () =>
+      (await t.db.select().from(inviteRequest).where(eq(inviteRequest.id, open?.id ?? '')))[0]?.status;
+    expect(await pendingStatus()).toBe('pending');
+    await t.db.insert(emailBlacklist).values({ email: newEmail });
+    expectError(await verify(token), 409, 'email_blacklisted');
+    expect(await pendingStatus()).toBe('pending');
   });
 
   it('refuses a used, unknown or expired link', async () => {
@@ -337,15 +467,38 @@ describe('changing email', () => {
 });
 
 describe('deleting your own account', () => {
-  const remove = (cookie: string | undefined) => t.request('DELETE', '/api/v1/me', undefined, { cookie });
+  const remove = (cookie: string | undefined, currentPassword = PASSWORD) =>
+    t.request('DELETE', '/api/v1/me', { currentPassword }, { cookie });
 
   it('needs a session', async () => {
     expectError(await remove(undefined), 401, 'unauthenticated');
   });
 
-  it('refuses the first admin', async () => {
+  it('refuses the first admin, even with the right password', async () => {
     expectError(await remove(admin.cookie), 403, 'first_admin_protected');
     expect(await t.db.select().from(user).where(eq(user.id, admin.id))).toHaveLength(1);
+  });
+
+  it('needs the current password', async () => {
+    const member = await t.seedLoggedIn();
+    expectError(await remove(member.cookie, 'wrong password'), 403, 'invalid_password');
+    expectError(await t.request('DELETE', '/api/v1/me', undefined, { cookie: member.cookie }), 400, 'validation_error');
+    expect(await t.db.select().from(user).where(eq(user.id, member.id))).toHaveLength(1);
+    expect(await canLogin(member.username, PASSWORD)).toBe(true);
+  });
+
+  it('shares its rate limit with changing email', async () => {
+    const member = await t.seedLoggedIn();
+    expectError(await remove(member.cookie, 'wrong password'), 403, 'invalid_password');
+    expectError(await remove(member.cookie, 'wrong password'), 403, 'invalid_password');
+    expectError(
+      await t.request('POST', '/api/v1/me/email', { currentPassword: 'wrong password', newEmail: uniqueEmail() }, { cookie: member.cookie }),
+      403,
+      'invalid_password',
+    );
+    expectError(await remove(member.cookie, 'wrong password'), 429, 'rate_limited');
+    expectError(await remove(member.cookie), 429, 'rate_limited');
+    expect(await t.db.select().from(user).where(eq(user.id, member.id))).toHaveLength(1);
   });
 
   it('works for a member and for another admin, and ends the session', async () => {
@@ -366,7 +519,7 @@ describe('deleting your own account', () => {
     try {
       const member = await secure.seedLoggedIn();
       expect(member.cookie).toMatch(/^__Secure-better-auth\.session_token=/);
-      const response = await secure.request('DELETE', '/api/v1/me', undefined, { cookie: member.cookie });
+      const response = await secure.request('DELETE', '/api/v1/me', { currentPassword: PASSWORD }, { cookie: member.cookie });
       expect(response.status).toBe(204);
       const cleared = response.headers.get('set-cookie');
       expect(cleared).toContain('__Secure-better-auth.session_token=;');

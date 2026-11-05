@@ -8,6 +8,7 @@ import {
   createInviteRequestSchema,
   decisionSchema,
   idParamSchema,
+  invitePreviewSchema,
   inviteRequestListQuerySchema,
   inviteRequestSchema,
   paginatedSchema,
@@ -22,7 +23,7 @@ import {
 } from '../auth/accounts.ts';
 import { inviteMail } from '../auth/emails.ts';
 import type { Transaction } from '../db/client.ts';
-import { inviteRequest, user } from '../db/schema.ts';
+import { emailBlacklist, inviteRequest, user } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
 import { lockEmails } from '../lib/locks.ts';
 import { sendOrFail } from '../lib/mailer.ts';
@@ -173,12 +174,28 @@ const revokeRoute = createRoute({
   },
 });
 
+const inviteTokenParamSchema = z.object({ token: z.string().min(1).max(512) });
+
+const previewRoute = createRoute({
+  method: 'get',
+  path: '/invites/{token}',
+  summary: 'What an invite link is for: its fixed email, and whether it can still be accepted',
+  request: { params: inviteTokenParamSchema },
+  responses: {
+    200: {
+      description: 'The same answer, with no email, for any link that cannot be accepted',
+      content: { 'application/json': { schema: invitePreviewSchema } },
+    },
+    ...invalidRequest,
+  },
+});
+
 const acceptRoute = createRoute({
   method: 'post',
   path: '/invites/{token}/accept',
   summary: 'Sign up with an invite link. The email is the invited one, verified by the link',
   request: {
-    params: z.object({ token: z.string().min(1).max(512) }),
+    params: inviteTokenParamSchema,
     body: { required: true, content: { 'application/json': { schema: acceptInviteSchema } } },
   },
   responses: {
@@ -358,6 +375,25 @@ export const inviteRoutes = createRouter()
       return toAdminInviteRequest(updated, await requesterUsernameOf(tx, updated.requesterId));
     });
     return c.json(result, 200);
+  })
+  .openapi(previewRoute, async (c) => {
+    const { db } = c.var.deps;
+    const tokenHash = hashToken(c.req.valid('param').token);
+    // Read-only. Same conditions as accepting, so `valid` tells the truth about the outcome.
+    const [row] = await db
+      .select({ email: inviteRequest.inviteeEmail })
+      .from(inviteRequest)
+      .where(
+        and(
+          eq(inviteRequest.tokenHash, tokenHash),
+          eq(inviteRequest.status, 'approved'),
+          sql`${inviteRequest.expiresAt} > now()`,
+          sql`NOT EXISTS (SELECT 1 FROM ${emailBlacklist} WHERE lower(${emailBlacklist.email}) = lower(${inviteRequest.inviteeEmail}))`,
+          sql`NOT EXISTS (SELECT 1 FROM ${user} WHERE lower(${user.email}) = lower(${inviteRequest.inviteeEmail}))`,
+        ),
+      );
+    c.header('Cache-Control', 'no-store');
+    return c.json({ valid: row !== undefined, email: row?.email ?? null }, 200);
   })
   .openapi(acceptRoute, async (c) => {
     const { db, auth } = c.var.deps;

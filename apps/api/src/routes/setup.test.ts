@@ -156,12 +156,27 @@ describe('first-run setup', () => {
   });
 
   it.each([
-    ['a short password', { password: 'short' }],
+    ['an 11-character password', { password: 'a'.repeat(11) }],
+    ['a 129-character password', { password: 'a'.repeat(129) }],
     ['an invalid email', { email: 'not-an-email' }],
     ['a short username', { username: 'ab' }],
     ['a username with other characters', { username: 'has space' }],
   ])('refuses %s', async (_label, overrides) => {
     expectError(await t.request('POST', '/api/v1/setup', form(overrides)), 400, 'validation_error');
+  });
+
+  it('accepts a 12-character password', async () => {
+    const started = await startSetup(form({ password: 'a'.repeat(12) }));
+    expect((await verify(started.token)).status).toBe(201);
+    await t.login(started.username, 'a'.repeat(12));
+  });
+
+  it('gives the link 24 hours', async () => {
+    await startSetup();
+    const [row] = await t.db.select().from(verification);
+    const hours = ((row?.expiresAt.getTime() ?? 0) - Date.now()) / 3_600_000;
+    expect(hours).toBeGreaterThan(23.9);
+    expect(hours).toBeLessThanOrEqual(24);
   });
 
   it('ignores an attempt to set extra fields', async () => {

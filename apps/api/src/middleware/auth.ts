@@ -1,8 +1,9 @@
-import { type UserRole, userRoleSchema } from '@osusume/shared';
+import { type ErrorResponse, type UserRole, userRoleSchema } from '@osusume/shared';
 import { createMiddleware } from 'hono/factory';
 import type { Auth } from '../auth/auth.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError } from '../lib/errors.ts';
+import { PASSWORD_CHECK_LIMIT, consumeAttempt } from '../lib/rate-limit.ts';
 
 export interface CurrentUser {
   id: string;
@@ -45,7 +46,26 @@ export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
   await next();
 });
 
-/** The same, and the user must be an admin. */
+/**
+ * requireSession for a route that checks the current password, limited per user across all
+ * such routes so a stolen session cannot guess it. The login and change-password endpoints
+ * have the equivalent from Better Auth. Per process: see lib/rate-limit.ts.
+ */
+export const requireSessionForPasswordCheck = createMiddleware<SessionEnv>(async (c, next) => {
+  const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
+  const retryAfter = consumeAttempt(`password-check:${currentUser.id}`, PASSWORD_CHECK_LIMIT);
+  if (retryAfter !== null) {
+    const body: ErrorResponse = {
+      error: { code: 'rate_limited', message: 'Too many attempts. Please try again later.' },
+    };
+    return c.json(body, 429, { 'X-Retry-After': String(retryAfter) });
+  }
+  c.set('currentUser', currentUser);
+  await next();
+  return undefined;
+});
+
+/** The same as requireSession, and the user must be an admin. */
 export const requireAdmin = createMiddleware<SessionEnv>(async (c, next) => {
   const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
   if (currentUser.role !== 'admin') {

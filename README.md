@@ -53,6 +53,11 @@ Better Auth is mounted at `/api/auth`, exposing only what `exposedAuthEndpoints`
 and trusts that header only when it holds a single value, so a proxy in front of the api must
 overwrite the header rather than append to it.
 
+That limiter counts per client IP on `/api/auth`. Other routes that check a password
+(`POST /me/email`, `DELETE /me`) use `requireSessionForPasswordCheck`, which allows 3 attempts per
+10 seconds per user. Both keep their counts in memory: they reset on restart, and each api process
+counts separately, so running N instances allows N times the attempts.
+
 Routes that need a login use `requireSession` or `requireAdmin` from
 `apps/api/src/middleware/auth.ts` as their `middleware`, then read `c.var.currentUser`.
 
