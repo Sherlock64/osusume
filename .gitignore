@@ -1,1 +1,22 @@
 PRD/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+.vite/
+
+# Test output
+coverage/
+
+# Local environment
+.data/
+.env
+.env.*
+!.env.example
+
+# Logs and OS files
+*.log
+.DS_Store
