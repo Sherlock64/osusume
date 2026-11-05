@@ -297,19 +297,19 @@ export const image = pgTable(
     width: integer().notNull(),
     height: integer().notNull(),
     uploadedBy: uuid().references(() => user.id, { onDelete: 'set null' }),
-    /** The catalog this image is in; null between upload and being added. */
-    seriesId: uuid().references(() => series.id, { onDelete: 'cascade' }),
+    /** The catalog this image is in. Every image is in one, from the moment it is uploaded. */
+    seriesId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
     /** The series' cover, and the default for its seasons. */
     isPrimary: boolean().notNull().default(false),
     /** When it joined the catalog: the earliest remaining takes over from a removed primary. */
-    addedAt: timestampMs(),
+    addedAt: timestampMs().notNull(),
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex('image_one_primary_per_series').on(t.seriesId).where(sql`${t.isPrimary}`),
     index('image_series_id_added_at_idx').on(t.seriesId, t.addedAt),
-    check('image_catalog_fields_together', sql`(${t.seriesId} IS NULL) = (${t.addedAt} IS NULL)`),
-    check('image_primary_in_catalog', sql`NOT ${t.isPrimary} OR ${t.seriesId} IS NOT NULL`),
   ],
 );
 

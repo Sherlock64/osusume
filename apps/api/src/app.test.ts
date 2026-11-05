@@ -70,7 +70,6 @@ describe('OpenAPI document', () => {
       '/catalog-requests',
       '/health',
       '/health/ready',
-      '/images',
       '/images/{id}/{size}',
       '/invite-requests',
       '/invites/{token}',
@@ -91,6 +90,17 @@ describe('OpenAPI document', () => {
       '/tags',
       '/tags/{id}',
       '/username-change-requests',
+    ]);
+  });
+
+  it('documents invite requests as write-only and image upload as multipart', async () => {
+    const response = await appWith(healthy).request('/api/v1/openapi.json');
+    const { paths } = (await response.json()) as {
+      paths: Record<string, Record<string, { requestBody?: { content: object } }>>;
+    };
+    expect(Object.keys(paths['/invite-requests'] ?? {})).toEqual(['post']);
+    expect(Object.keys(paths['/series/{id}/images']?.post?.requestBody?.content ?? {})).toEqual([
+      'multipart/form-data',
     ]);
   });
 

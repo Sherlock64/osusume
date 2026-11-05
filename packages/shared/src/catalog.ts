@@ -284,10 +284,6 @@ export const seriesImageListQuerySchema = paginationQuerySchema;
 
 export const seriesImageParamSchema = z.object({ id: z.uuid(), imageId: z.uuid() });
 
-/** An uploaded image to add to the catalog. An image can only ever be in one catalog. */
-export const addSeriesImageSchema = z.object({ imageId: z.uuid() });
-export type AddSeriesImage = z.infer<typeof addSeriesImageSchema>;
-
 export const seriesImageSchema = imageSchema.extend({
   isPrimary: z.boolean(),
   addedAt: timestampSchema,

@@ -103,8 +103,9 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
     return { status: response.status, body: parsed, text, headers: response.headers };
   }
 
-  /** Uploads a file as multipart form data, declaring the given type and name. */
+  /** Uploads a file into a series' catalog as multipart form data, declaring the given type and name. */
   async function upload(
+    seriesId: string,
     bytes: Uint8Array,
     options: { cookie?: string; type?: string; name?: string; field?: string } = {},
   ): Promise<TestResponse> {
@@ -113,7 +114,7 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
       type: options.type ?? 'image/png',
     });
     form.append(options.field ?? 'file', file);
-    const response = await app.request(`${publicBaseUrl}/api/v1/images`, {
+    const response = await app.request(`${publicBaseUrl}/api/v1/series/${seriesId}/images`, {
       method: 'POST',
       headers: {
         origin: publicBaseUrl,

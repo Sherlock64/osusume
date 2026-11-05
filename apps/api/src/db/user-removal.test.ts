@@ -142,6 +142,11 @@ describe('removing a user', () => {
     const admin = await createUser({ role: 'admin' });
     const requester = await createUser();
 
+    const [entry] = await db
+      .insert(series)
+      .values({ title: 'Kept' })
+      .returning();
+    if (!entry) throw new Error('series was not created');
     const [cover] = await db
       .insert(image)
       .values({
@@ -150,18 +155,12 @@ describe('removing a user', () => {
         width: 1,
         height: 1,
         uploadedBy: admin.id,
+        seriesId: entry.id,
+        isPrimary: true,
+        addedAt: new Date(),
       })
       .returning();
     if (!cover) throw new Error('image was not created');
-    const [entry] = await db
-      .insert(series)
-      .values({ title: 'Kept' })
-      .returning();
-    if (!entry) throw new Error('series was not created');
-    await db
-      .update(image)
-      .set({ seriesId: entry.id, isPrimary: true, addedAt: new Date() })
-      .where(eq(image.id, cover.id));
     const [request] = await db
       .insert(catalogRequest)
       .values({

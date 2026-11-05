@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { eq, sql } from 'drizzle-orm';
@@ -68,15 +69,8 @@ async function makeSeason(seriesId: string, values: Record<string, unknown> = {}
   return response.body as SeasonBody;
 }
 
-async function uploadImage() {
-  const response = await t.upload(png, { cookie: admin.cookie });
-  expect(response.status).toBe(201);
-  return (response.body as { id: string }).id;
-}
-
 async function addImage(seriesId: string) {
-  const imageId = await uploadImage();
-  const response = await asAdmin('POST', `/series/${seriesId}/images`, { imageId });
+  const response = await t.upload(seriesId, png, { cookie: admin.cookie });
   expect(response.status).toBe(201);
   return response.body as CatalogImage;
 }
@@ -111,14 +105,20 @@ describe('authorization', () => {
   });
 
   it.each([
-    ['POST', '', { imageId: NO_ID }],
-    ['POST', `/${NO_ID}/primary`, undefined],
-    ['DELETE', `/${NO_ID}`, undefined],
-  ])('%s /series/{id}/images%s refuses the anonymous and members', async (method, suffix, body) => {
+    ['POST', `/${NO_ID}/primary`],
+    ['DELETE', `/${NO_ID}`],
+  ])('%s /series/{id}/images%s refuses the anonymous and members', async (method, suffix) => {
     const series = await makeSeries();
     const path = `/series/${series.id}/images${suffix}`;
-    expectError(await t.request(method, `/api/v1${path}`, body), 401, 'unauthenticated');
-    expectError(await asMember(method, path, body), 403, 'admin_required');
+    expectError(await t.request(method, `/api/v1${path}`), 401, 'unauthenticated');
+    expectError(await asMember(method, path), 403, 'admin_required');
+  });
+
+  it('uploading refuses the anonymous and members, storing nothing', async () => {
+    const series = await makeSeries();
+    expectError(await t.upload(series.id, png), 401, 'unauthenticated');
+    expectError(await t.upload(series.id, png, { cookie: member.cookie }), 403, 'admin_required');
+    expect(await catalogOf(series.id)).toEqual([]);
   });
 });
 
@@ -132,26 +132,99 @@ describe('adding', () => {
     expect((await catalogOf(series.id)).map((row) => row.id)).toEqual([first.id, second.id]);
   });
 
-  it('refuses a missing series, a missing image, and an image already in a catalog', async () => {
+  it('uploads and attaches in one call, answering with the catalog entry', async () => {
     const series = await makeSeries();
-    const other = await makeSeries();
-    const imageId = await uploadImage();
-    expectError(await asAdmin('POST', `/series/${NO_ID}/images`, { imageId }), 404, 'series_not_found');
-    expectError(await asAdmin('POST', `/series/${series.id}/images`, { imageId: NO_ID }), 404, 'image_not_found');
-    expect((await asAdmin('POST', `/series/${series.id}/images`, { imageId })).status).toBe(201);
-    expectError(await asAdmin('POST', `/series/${series.id}/images`, { imageId }), 409, 'image_in_catalog');
-    expectError(await asAdmin('POST', `/series/${other.id}/images`, { imageId }), 409, 'image_in_catalog');
+    const response = await t.upload(series.id, png, { cookie: admin.cookie });
+    expect(response.status).toBe(201);
+    const added = response.body as CatalogImage & { addedAt: string; createdAt: string; mime: string };
+    expect(added).toMatchObject({ mime: 'image/webp', width: 60, height: 90, isPrimary: true });
+    expect(added.addedAt).toEqual(expect.any(String));
+    expect(added.createdAt).toEqual(expect.any(String));
+    expect(await catalogOf(series.id)).toMatchObject([{ id: added.id }]);
+    const [row] = await t.db.select().from(image).where(eq(image.id, added.id));
+    expect(row).toMatchObject({ seriesId: series.id, uploadedBy: admin.id });
+    expect(await filesOf(row?.storageKey ?? '')).toEqual(['large.webp', 'medium.webp', 'original', 'small.webp']);
+  });
+
+  it('refuses a missing series before storing anything', async () => {
+    const before = await readdir(join(t.imageDirectory, 'images'));
+    expectError(await t.upload(NO_ID, png, { cookie: admin.cookie }), 404, 'series_not_found');
+    expect(await readdir(join(t.imageDirectory, 'images'))).toEqual(before);
   });
 
   it('gives one primary when two images are added at the same moment', async () => {
     const series = await makeSeries();
-    const [a, b] = [await uploadImage(), await uploadImage()];
     const responses = await Promise.all([
-      asAdmin('POST', `/series/${series.id}/images`, { imageId: a }),
-      asAdmin('POST', `/series/${series.id}/images`, { imageId: b }),
+      t.upload(series.id, png, { cookie: admin.cookie }),
+      t.upload(series.id, png, { cookie: admin.cookie }),
     ]);
     expect(responses.map((response) => response.status)).toEqual([201, 201]);
     expect((await catalogOf(series.id)).filter((row) => row.isPrimary)).toHaveLength(1);
+  });
+});
+
+describe('cleaning up after a failed upload', () => {
+  const stored = async () => (await readdir(join(t.imageDirectory, 'images'))).sort();
+
+  it('removes the files if the series is deleted while they are written', async () => {
+    const series = await makeSeries();
+    const before = await stored();
+    const put = t.imageStorage.put;
+    let puts = 0;
+    t.imageStorage.put = async (key, bytes) => {
+      await put(key, bytes);
+      puts += 1;
+      if (puts === 4) await asAdmin('DELETE', `/series/${series.id}`);
+    };
+    try {
+      expectError(await t.upload(series.id, png, { cookie: admin.cookie }), 404, 'series_not_found');
+    } finally {
+      t.imageStorage.put = put;
+    }
+    expect(puts).toBe(4);
+    expect(await stored()).toEqual(before);
+  });
+
+  it('removes the files if the database write fails', async () => {
+    const series = await makeSeries();
+    const before = await stored();
+    await t.db.execute(sql`
+      CREATE FUNCTION test_refuse_image_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'refused by the test'; END;
+      $$
+    `);
+    await t.db.execute(
+      sql`CREATE TRIGGER test_refuse_image_insert BEFORE INSERT ON image FOR EACH ROW EXECUTE FUNCTION test_refuse_image_insert()`,
+    );
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect((await t.upload(series.id, png, { cookie: admin.cookie })).status).toBe(500);
+    } finally {
+      quiet.mockRestore();
+      await t.db.execute(sql`DROP TRIGGER test_refuse_image_insert ON image`);
+      await t.db.execute(sql`DROP FUNCTION test_refuse_image_insert`);
+    }
+    expect(await stored()).toEqual(before);
+    expect(await catalogOf(series.id)).toEqual([]);
+  });
+
+  it('removes the sizes already written if a later write fails', async () => {
+    const series = await makeSeries();
+    const before = await stored();
+    const put = t.imageStorage.put;
+    t.imageStorage.put = async (key, bytes) => {
+      if (key.endsWith('/original')) throw new Error('volume is full');
+      await put(key, bytes);
+    };
+    const quiet = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      expect((await t.upload(series.id, png, { cookie: admin.cookie })).status).toBe(500);
+    } finally {
+      quiet.mockRestore();
+      t.imageStorage.put = put;
+    }
+    expect(await stored()).toEqual(before);
+    expect(await catalogOf(series.id)).toEqual([]);
   });
 });
 
@@ -216,11 +289,23 @@ describe('one primary, enforced by the database', () => {
     ).rejects.toMatchObject({ cause: { constraint: 'image_one_primary_per_series' } });
   });
 
-  it('refuses a primary outside any catalog', async () => {
-    const imageId = await uploadImage();
+  it.each([
+    ['catalog', { addedAt: new Date() }, 'series_id'],
+    ['time it was added', {}, 'added_at'],
+  ])('refuses an image with no %s', async (_label, values, column) => {
+    const series = await makeSeries();
+    const row = {
+      storageKey: `images/${randomUUID()}`,
+      mime: 'image/webp',
+      width: 1,
+      height: 1,
+      ...(column === 'added_at' ? { seriesId: series.id } : {}),
+      ...values,
+    };
     await expect(
-      t.db.update(image).set({ isPrimary: true }).where(eq(image.id, imageId)),
-    ).rejects.toMatchObject({ cause: { constraint: 'image_primary_in_catalog' } });
+      // @ts-expect-error The types already rule this out; the database must too.
+      t.db.insert(image).values(row),
+    ).rejects.toMatchObject({ cause: { code: '23502', column } });
   });
 });
 
@@ -415,19 +500,18 @@ describe('resolved covers', () => {
     expect(await seasonRead(season.id)).toMatchObject({ coverImageId: null, cover: { id: primary.id } });
   });
 
-  it("refuse a season cover from another series' catalog, or outside any catalog", async () => {
+  it("refuse a season cover from another series' catalog", async () => {
     const series = await makeSeries();
     await addImage(series.id);
     const other = await makeSeries();
     const foreign = await addImage(other.id);
-    const unattached = await uploadImage();
     expectError(
       await asAdmin('POST', '/seasons', { seriesId: series.id, ordinal: 1, title: 'x', coverImageId: foreign.id }),
       400,
       'image_not_in_series',
     );
     const season = await makeSeason(series.id);
-    for (const coverImageId of [foreign.id, unattached, NO_ID]) {
+    for (const coverImageId of [foreign.id, NO_ID]) {
       expectError(await asAdmin('PATCH', `/seasons/${season.id}`, { coverImageId }), 400, 'image_not_in_series');
     }
   });

@@ -1,4 +1,10 @@
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sql } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/node-postgres';
+import { migrate } from 'drizzle-orm/node-postgres/migrator';
 import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -126,6 +132,50 @@ describe('migrations on a real Postgres', () => {
       }
     } finally {
       await pool.end();
+    }
+  });
+});
+
+describe('migration 0007', () => {
+  it('removes images in no catalog, keeps the rest, and makes the columns required', async () => {
+    const before = await mkdtemp(join(tmpdir(), 'osusume-migrations-'));
+    const scratch = await createScratchDatabase();
+    const client = new pg.Client({ connectionString: scratch.url });
+    await client.connect();
+    try {
+      // The migrations as they stood before this one.
+      await cp(fileURLToPath(new URL('../../drizzle', import.meta.url)), before, { recursive: true });
+      const journalPath = join(before, 'meta', '_journal.json');
+      const journal = JSON.parse(await readFile(journalPath, 'utf8')) as { entries: { idx: number }[] };
+      journal.entries = journal.entries.filter((entry) => entry.idx < 7);
+      await writeFile(journalPath, JSON.stringify(journal));
+      await migrate(drizzle({ client }), { migrationsFolder: before });
+
+      const { rows } = await client.query<{ id: string }>(
+        `INSERT INTO series (title) VALUES ('Kept') RETURNING id`,
+      );
+      await client.query(
+        `INSERT INTO image (storage_key, mime, width, height) VALUES ('images/unattached', 'image/webp', 1, 1)`,
+      );
+      await client.query(
+        `INSERT INTO image (storage_key, mime, width, height, series_id, is_primary, added_at)
+         VALUES ('images/attached', 'image/webp', 1, 1, $1, true, now())`,
+        [rows[0]?.id],
+      );
+
+      await applyMigrations(scratch.url);
+
+      const left = await client.query(`SELECT storage_key FROM image`);
+      expect(left.rows).toEqual([{ storage_key: 'images/attached' }]);
+      const columns = await client.query(
+        `SELECT column_name, is_nullable FROM information_schema.columns
+         WHERE table_name = 'image' AND column_name IN ('series_id', 'added_at')`,
+      );
+      expect(columns.rows.map((column: { is_nullable: string }) => column.is_nullable)).toEqual(['NO', 'NO']);
+    } finally {
+      await client.end();
+      await scratch.drop();
+      await rm(before, { recursive: true, force: true });
     }
   });
 });

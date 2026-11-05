@@ -1,24 +1,29 @@
 import { createRoute, z } from '@hono/zod-openapi';
 import {
-  addSeriesImageSchema,
+  MAX_IMAGE_UPLOAD_BYTES,
+  errorResponseSchema,
   idParamSchema,
+  imageSizes,
   paginatedSchema,
   seriesImageListQuerySchema,
   seriesImageParamSchema,
   seriesImageSchema,
 } from '@osusume/shared';
 import { and, asc, eq } from 'drizzle-orm';
+import { bodyLimit } from 'hono/body-limit';
+import { createMiddleware } from 'hono/factory';
 import { lockSeries, seriesNotFound } from '../catalog/entries.ts';
 import type { Transaction } from '../db/client.ts';
 import { image, series } from '../db/schema.ts';
+import type { AppEnv } from '../lib/context.ts';
 import { ApiError } from '../lib/errors.ts';
 import { revalidatedRead } from '../lib/http-cache.ts';
-import { removeImageFiles } from '../lib/image-storage.ts';
+import { STORED_IMAGE_MIME, processImage } from '../lib/image-processing.ts';
+import { imageOriginalKey, imageVariantKey, removeImageFiles } from '../lib/image-storage.ts';
 import { lockCatalog } from '../lib/locks.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import {
   adminOnly,
-  conflict,
   createRouter,
   invalidRequest,
   notFound,
@@ -29,13 +34,29 @@ import {
 import { requireAdmin, requireSession } from '../middleware/auth.ts';
 
 const imageNotFound = () => new ApiError(404, 'image_not_found', 'No such image.');
+const imageTooLarge = () =>
+  new ApiError(
+    413,
+    'image_too_large',
+    `Images can be at most ${String(MAX_IMAGE_UPLOAD_BYTES / (1024 * 1024))} MB.`,
+  );
+
+// Room for the multipart framing around the file, so the file's own size decides.
+const MULTIPART_OVERHEAD_BYTES = 64 * 1024;
+
+const limitUploadSize = bodyLimit({
+  maxSize: MAX_IMAGE_UPLOAD_BYTES + MULTIPART_OVERHEAD_BYTES,
+  onError: () => {
+    throw imageTooLarge();
+  },
+});
+
+/** Stops reading the body at the limit, before it is parsed. */
+const uploadSizeLimit = createMiddleware<AppEnv>(async (c, next) => {
+  await limitUploadSize(c, next);
+});
 
 type ImageRow = typeof image.$inferSelect;
-
-function addedAtOf(row: ImageRow): Date {
-  if (row.addedAt === null) throw new Error('An image in a catalog has no added time');
-  return row.addedAt;
-}
 
 function toSeriesImage(row: ImageRow) {
   return {
@@ -44,7 +65,7 @@ function toSeriesImage(row: ImageRow) {
     width: row.width,
     height: row.height,
     isPrimary: row.isPrimary,
-    addedAt: addedAtOf(row).toISOString(),
+    addedAt: row.addedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -84,19 +105,39 @@ const listRoute = createRoute({
 const addRoute = createRoute({
   method: 'post',
   path: '/series/{id}/images',
-  summary: 'Add an uploaded image to the catalog. The first image becomes the primary',
+  summary:
+    'Upload an image into the catalog. Its content decides whether it is accepted. The first image becomes the primary',
   security: sessionSecurity,
-  middleware: requireAdmin,
+  middleware: [requireAdmin, uploadSizeLimit] as const,
   request: {
     params: idParamSchema,
-    body: { required: true, content: { 'application/json': { schema: addSeriesImageSchema } } },
+    body: {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: z.object({
+            file: z.file().openapi({ type: 'string', format: 'binary' }),
+          }),
+        },
+      },
+    },
   },
   responses: {
-    201: { description: 'The image in the catalog', content: seriesImageContent },
+    201: {
+      description: 'The image in the catalog, available in every named size',
+      content: seriesImageContent,
+    },
     ...invalidRequest,
     ...adminOnly,
     ...notFound,
-    ...conflict,
+    413: {
+      description: 'The file is too large',
+      content: { 'application/json': { schema: errorResponseSchema } },
+    },
+    415: {
+      description: 'The content is not an accepted image format',
+      content: { 'application/json': { schema: errorResponseSchema } },
+    },
   },
 });
 
@@ -150,36 +191,59 @@ export const seriesImageRoutes = createRouter()
       .orderBy(...page.orderBy)
       .limit(limit + 1);
     const { items, nextCursor } = toPage(rows, limit, (row) => ({
-      sort: addedAtOf(row),
+      sort: row.addedAt,
       id: row.id,
     }));
     return c.json({ items: items.map(toSeriesImage), nextCursor }, 200);
   })
   .openapi(addRoute, async (c) => {
-    const { db } = c.var.deps;
+    const { db, imageStorage } = c.var.deps;
     const { id } = c.req.valid('param');
-    const { imageId } = c.req.valid('json');
-    const added = await db.transaction(async (tx) => {
-      await lockCatalog(tx);
-      await lockSeries(tx, id);
-      const [row] = await tx.select().from(image).where(eq(image.id, imageId)).for('update');
-      if (!row) throw imageNotFound();
-      if (row.seriesId !== null) {
-        throw new ApiError(409, 'image_in_catalog', 'This image is already in a catalog.');
+    const { file } = c.req.valid('form');
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) throw imageTooLarge();
+    // Checked again under the lock. This one spares resizing an image with nowhere to go.
+    const [found] = await db.select({ id: series.id }).from(series).where(eq(series.id, id));
+    if (!found) throw seriesNotFound();
+
+    const processed = await processImage(new Uint8Array(await file.arrayBuffer()));
+    const imageId = crypto.randomUUID();
+    const storageKey = `images/${imageId}`;
+
+    // Files first: a row never points at bytes that are not there.
+    try {
+      for (const size of imageSizes) {
+        await imageStorage.put(imageVariantKey(storageKey, size), processed.variants[size]);
       }
-      const [primary] = await tx
-        .select({ id: image.id })
-        .from(image)
-        .where(and(eq(image.seriesId, id), eq(image.isPrimary, true)));
-      const [updated] = await tx
-        .update(image)
-        .set({ seriesId: id, isPrimary: primary === undefined, addedAt: new Date() })
-        .where(eq(image.id, imageId))
-        .returning();
-      if (!updated) throw imageNotFound();
-      return updated;
-    });
-    return c.json(toSeriesImage(added), 201);
+      await imageStorage.put(imageOriginalKey(storageKey), processed.original);
+      const added = await db.transaction(async (tx) => {
+        await lockCatalog(tx);
+        await lockSeries(tx, id);
+        const [primary] = await tx
+          .select({ id: image.id })
+          .from(image)
+          .where(and(eq(image.seriesId, id), eq(image.isPrimary, true)));
+        const [row] = await tx
+          .insert(image)
+          .values({
+            id: imageId,
+            storageKey,
+            mime: STORED_IMAGE_MIME,
+            width: processed.width,
+            height: processed.height,
+            uploadedBy: c.var.currentUser.id,
+            seriesId: id,
+            isPrimary: primary === undefined,
+            addedAt: new Date(),
+          })
+          .returning();
+        if (!row) throw new Error('image was not created');
+        return row;
+      });
+      return c.json(toSeriesImage(added), 201);
+    } catch (error) {
+      await removeImageFiles(imageStorage, [storageKey]);
+      throw error;
+    }
   })
   .openapi(setPrimaryRoute, async (c) => {
     const { db } = c.var.deps;

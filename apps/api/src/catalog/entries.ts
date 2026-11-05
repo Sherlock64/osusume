@@ -253,7 +253,7 @@ async function primaryCovers(db: Reader, seriesIds: readonly string[]) {
     .where(and(inArray(image.seriesId, [...seriesIds]), eq(image.isPrimary, true)));
   const covers = new Map<string, Cover>();
   for (const { seriesId, ...cover } of rows) {
-    if (seriesId !== null) covers.set(seriesId, cover);
+    covers.set(seriesId, cover);
   }
   return covers;
 }

@@ -12,6 +12,7 @@ import { type TestApp, createTestApp, expectError } from '../test-support/test-a
 let t: TestApp;
 let admin: Awaited<ReturnType<TestApp['seedLoggedIn']>>;
 let member: Awaited<ReturnType<TestApp['seedLoggedIn']>>;
+let catalogId: string;
 let png: Buffer;
 
 const NO_ID = '00000000-0000-4000-8000-000000000000';
@@ -24,6 +25,8 @@ beforeAll(async () => {
   admin = await t.seedLoggedIn({ role: 'admin', isFirstAdmin: true });
   member = await t.seedLoggedIn();
   png = await solid(800, 1200).png().toBuffer();
+  const created = await t.request('POST', '/api/v1/series', { title: 'Catalog' }, { cookie: admin.cookie });
+  catalogId = (created.body as { id: string }).id;
 });
 
 afterAll(async () => {
@@ -38,7 +41,7 @@ interface ImageBody {
 }
 
 async function uploaded(bytes: Uint8Array = png) {
-  const response = await t.upload(bytes, { cookie: admin.cookie });
+  const response = await t.upload(catalogId, bytes, { cookie: admin.cookie });
   expect(response.status).toBe(201);
   return response.body as ImageBody;
 }
@@ -51,8 +54,8 @@ async function fetchImage(id: string, size: string, headers: Record<string, stri
 
 describe('authorization', () => {
   it('uploading refuses the anonymous and members', async () => {
-    expectError(await t.upload(png), 401, 'unauthenticated');
-    expectError(await t.upload(png, { cookie: member.cookie }), 403, 'admin_required');
+    expectError(await t.upload(catalogId, png), 401, 'unauthenticated');
+    expectError(await t.upload(catalogId, png, { cookie: member.cookie }), 403, 'admin_required');
   });
 
   it('reading needs a session', async () => {
@@ -83,7 +86,7 @@ describe('uploading', () => {
   });
 
   it('goes by the content, not the declared type or name', async () => {
-    const response = await t.upload(png, { cookie: admin.cookie, type: 'text/plain', name: 'notes.txt' });
+    const response = await t.upload(catalogId, png, { cookie: admin.cookie, type: 'text/plain', name: 'notes.txt' });
     expect(response.status).toBe(201);
   });
 
@@ -93,47 +96,47 @@ describe('uploading', () => {
     ['an SVG declared as a PNG', Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="9" height="9"/>')],
     ['an empty file', Buffer.alloc(0)],
   ])('refuses %s', async (_label, bytes) => {
-    const response = await t.upload(bytes, { cookie: admin.cookie, type: 'image/png', name: 'cover.png' });
+    const response = await t.upload(catalogId, bytes, { cookie: admin.cookie, type: 'image/png', name: 'cover.png' });
     expectError(response, 415, 'unsupported_image_format');
   });
 
   it('refuses a real image in a format it does not accept', async () => {
     const gif = await solid(10, 10).gif().toBuffer();
-    expectError(await t.upload(gif, { cookie: admin.cookie, type: 'image/png' }), 415, 'unsupported_image_format');
+    expectError(await t.upload(catalogId, gif, { cookie: admin.cookie, type: 'image/png' }), 415, 'unsupported_image_format');
     const tiff = await solid(10, 10).tiff().toBuffer();
-    expectError(await t.upload(tiff, { cookie: admin.cookie, type: 'image/png' }), 415, 'unsupported_image_format');
+    expectError(await t.upload(catalogId, tiff, { cookie: admin.cookie, type: 'image/png' }), 415, 'unsupported_image_format');
   });
 
   it('refuses a truncated image with a valid signature', async () => {
     const whole = await solid(400, 400).jpeg().toBuffer();
     const cut = whole.subarray(0, Math.floor(whole.length / 2));
-    expectError(await t.upload(cut, { cookie: admin.cookie, type: 'image/jpeg' }), 400, 'invalid_image');
+    expectError(await t.upload(catalogId, cut, { cookie: admin.cookie, type: 'image/jpeg' }), 400, 'invalid_image');
   });
 
   it('refuses garbage behind a valid signature', async () => {
     const fake = Buffer.concat([png.subarray(0, 8), Buffer.alloc(500, 7)]);
-    expectError(await t.upload(fake, { cookie: admin.cookie }), 400, 'invalid_image');
+    expectError(await t.upload(catalogId, fake, { cookie: admin.cookie }), 400, 'invalid_image');
   });
 
   it('refuses a small file that decodes to a huge image', async () => {
     const bomb = await solid(8000, 8000).png({ compressionLevel: 9 }).toBuffer();
     expect(bomb.length).toBeLessThan(MAX_IMAGE_UPLOAD_BYTES);
-    expectError(await t.upload(bomb, { cookie: admin.cookie }), 400, 'invalid_image');
+    expectError(await t.upload(catalogId, bomb, { cookie: admin.cookie }), 400, 'invalid_image');
   });
 
   it('refuses a file over the limit', async () => {
     const big = Buffer.alloc(MAX_IMAGE_UPLOAD_BYTES + 1, 0);
-    expectError(await t.upload(big, { cookie: admin.cookie }), 413, 'image_too_large');
+    expectError(await t.upload(catalogId, big, { cookie: admin.cookie }), 413, 'image_too_large');
     const far = Buffer.alloc(MAX_IMAGE_UPLOAD_BYTES + 1024 * 1024, 0);
-    expectError(await t.upload(far, { cookie: admin.cookie }), 413, 'image_too_large');
+    expectError(await t.upload(catalogId, far, { cookie: admin.cookie }), 413, 'image_too_large');
   });
 
   it('refuses a body with no file field', async () => {
-    expectError(await t.upload(png, { cookie: admin.cookie, field: 'other' }), 400, 'validation_error');
+    expectError(await t.upload(catalogId, png, { cookie: admin.cookie, field: 'other' }), 400, 'validation_error');
   });
 
   it('refuses a body that is not multipart', async () => {
-    const response = await t.request('POST', '/api/v1/images', { file: 'nope' }, { cookie: admin.cookie });
+    const response = await t.request('POST', `/api/v1/series/${catalogId}/images`, { file: 'nope' }, { cookie: admin.cookie });
     expectError(response, 415, 'bad_request');
   });
 
@@ -180,22 +183,15 @@ describe('uploading', () => {
     expect(await uploaded(rotated)).toMatchObject({ width: 20, height: 40 });
   });
 
-  it('removes its files if the database write fails', async () => {
-    const before = await readdir(join(t.imageDirectory, 'images'));
-    const original = t.db.insert.bind(t.db);
-    t.db.insert = () => {
-      throw new Error('database is down');
-    };
-    const originalError = console.error;
-    console.error = () => undefined;
-    try {
-      const response = await t.upload(png, { cookie: admin.cookie });
-      expect(response.status).toBe(500);
-    } finally {
-      t.db.insert = original;
-      console.error = originalError;
-    }
-    expect((await readdir(join(t.imageDirectory, 'images'))).sort()).toEqual(before.sort());
+  it('has no separate upload step', async () => {
+    const form = new FormData();
+    form.append('file', new File([Buffer.from(png)], 'upload.png', { type: 'image/png' }));
+    const response = await t.app.request('http://osusume.test/api/v1/images', {
+      method: 'POST',
+      headers: { origin: 'http://osusume.test', cookie: admin.cookie },
+      body: form,
+    });
+    expect(response.status).toBe(404);
   });
 });
 
@@ -262,7 +258,7 @@ describe('reading', () => {
 describe('the uploader', () => {
   it('stays when the uploader is removed, with their identity blanked', async () => {
     const leaving = await t.seedLoggedIn({ role: 'admin' });
-    const response = await t.upload(png, { cookie: leaving.cookie });
+    const response = await t.upload(catalogId, png, { cookie: leaving.cookie });
     const { id } = response.body as ImageBody;
     await removeUser(t.db, leaving.id);
     const [row] = await t.db.select().from(image).where(eq(image.id, id));
