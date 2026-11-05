@@ -38,6 +38,7 @@ describe('migrations on a real Postgres', () => {
       'account',
       'catalog_request',
       'email_blacklist',
+      'email_change_request',
       'friendship',
       'image',
       'invite_request',

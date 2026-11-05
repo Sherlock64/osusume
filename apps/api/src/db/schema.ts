@@ -31,15 +31,18 @@ import {
  * All of these happen on `DELETE FROM "user"`, so no code path can forget a step.
  *
  *   CASCADE    session, account, list_entry, list_settings, friendship (either
- *              side) and username_change_request: this is the user's own data.
+ *              side), username_change_request and email_change_request: this is
+ *              the user's own data.
  *   SET NULL   who-did-it columns: image.uploaded_by, catalog_request.requester_id
  *              and reviewed_by, invite_request.requester_id and decided_by,
  *              username_change_request.decided_by and email_blacklist.banned_by.
  *              The record stays with the identity blanked.
- *   TRIGGER    user_before_delete (migration 0004), for what depends on row contents:
+ *   TRIGGER    user_before_delete (migration 0005), for what depends on row contents:
  *              - deletes the user's pending catalog and invite requests;
  *              - revokes invites they requested that are approved but unaccepted;
  *              - deletes invite rows holding the user's own email;
+ *              - deletes Better Auth verification rows (password reset tokens), which
+ *                have no foreign key and hold the user id in `value`;
  *              - refuses to delete the first admin.
  *
  * Banning is a removal plus an email_blacklist row, which keeps the address. After
@@ -86,10 +89,19 @@ export const user = pgTable(
     email: text().notNull(),
     emailVerified: boolean().notNull().default(false),
     image: text(),
+    /**
+     * The lowercase lookup key, so this column's unique constraint ignores case. Better
+     * Auth signs in by lowercasing the entered name and comparing it to this column.
+     * Trigger user_normalize_username (migration 0005) lowercases every write.
+     */
     username: text().notNull().unique(),
+    /** The capitalization the user entered, for display. Always a case variant of username. */
     displayUsername: text(),
     role: userRole().notNull().default('member'),
-    /** The permanent first admin. See the constraints below and user_before_delete. */
+    /**
+     * The permanent first admin. See the constraints below, user_before_delete and
+     * user_first_admin_immutable, which stops this being changed after creation.
+     */
     isFirstAdmin: boolean().notNull().default(false),
     /** Set while the account is disabled; null when active. Reversible. */
     disabledAt: timestampMs(),
@@ -102,6 +114,10 @@ export const user = pgTable(
     check(
       'user_first_admin_stays_active_admin',
       sql`NOT ${t.isFirstAdmin} OR (${t.role} = 'admin' AND ${t.disabledAt} IS NULL)`,
+    ),
+    check(
+      'user_username_case',
+      sql`${t.username} = lower(${t.username}) AND (${t.displayUsername} IS NULL OR lower(${t.displayUsername}) = ${t.username})`,
     ),
   ],
 );
@@ -208,6 +224,23 @@ export const inviteRequest = pgTable(
       .where(sql`${t.status} = 'pending'`),
   ],
 );
+
+/**
+ * A change of email waiting for its link to be clicked; the user's email is untouched
+ * until then. One per user: asking again replaces the earlier request and its link.
+ */
+export const emailChangeRequest = pgTable('email_change_request', {
+  id: primaryId(),
+  userId: uuid()
+    .notNull()
+    .unique()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  newEmail: text().notNull(),
+  /** The raw token is only ever in the emailed link. */
+  tokenHash: text().notNull().unique(),
+  expiresAt: timestampMs().notNull(),
+  createdAt: createdAt(),
+});
 
 /** Emails that cannot be invited again. Lookups compare on lower(email). */
 export const emailBlacklist = pgTable(
@@ -335,11 +368,16 @@ export const season = pgTable(
   ],
 );
 
-export const tag = pgTable('tag', {
-  id: primaryId(),
-  name: text().notNull().unique(),
-  createdAt: createdAt(),
-});
+export const tag = pgTable(
+  'tag',
+  {
+    id: primaryId(),
+    /** Unique ignoring case; the entered capitalization is kept. */
+    name: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex('tag_name_lower_unique').on(sql`lower(${t.name})`)],
+);
 
 export const seriesTag = pgTable(
   'series_tag',
