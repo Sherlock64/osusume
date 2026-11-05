@@ -23,6 +23,8 @@ const envSchema = databaseEnvSchema
       emptyAsUnset,
       z.url({ protocol: /^https?$/ }).transform((url) => url.replace(/\/+$/, '')),
     ),
+    /** Signs session cookies. Rotating it signs everyone out. */
+    AUTH_SECRET: z.preprocess(emptyAsUnset, z.string().min(32)),
     IMAGE_STORAGE_PATH: z.preprocess(emptyAsUnset, z.string().min(1)),
     SMTP_HOST: z.preprocess(emptyAsUnset, z.string().min(1)),
     SMTP_PORT: z.preprocess(emptyAsUnset, z.coerce.number().int().min(1).max(65535)),

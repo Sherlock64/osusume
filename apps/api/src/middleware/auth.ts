@@ -1,0 +1,56 @@
+import { type UserRole, userRoleSchema } from '@osusume/shared';
+import { createMiddleware } from 'hono/factory';
+import type { Auth } from '../auth/auth.ts';
+import type { AppEnv } from '../lib/context.ts';
+import { ApiError } from '../lib/errors.ts';
+
+export interface CurrentUser {
+  id: string;
+  username: string;
+  email: string;
+  role: UserRole;
+  isFirstAdmin: boolean;
+}
+
+interface SessionEnv extends AppEnv {
+  Variables: AppEnv['Variables'] & { currentUser: CurrentUser };
+}
+
+async function loadCurrentUser(auth: Auth, headers: Headers): Promise<CurrentUser> {
+  const result = await auth.api.getSession({
+    headers,
+    query: { disableRefresh: true },
+  });
+  if (!result) throw new ApiError(401, 'unauthenticated', 'Log in to continue.');
+  if (result.user.disabledAt != null) {
+    throw new ApiError(403, 'account_disabled', 'This account is disabled.');
+  }
+  return {
+    id: result.user.id,
+    username: result.user.displayUsername ?? result.user.name,
+    email: result.user.email,
+    role: userRoleSchema.parse(result.user.role),
+    isFirstAdmin: result.user.isFirstAdmin === true,
+  };
+}
+
+/**
+ * Requires a logged-in, enabled user and sets `currentUser`. Pass as a route's `middleware`.
+ * Reads the session and user from the database on every request (Better Auth's cookie
+ * cache is off), so a role change or a disable applies immediately. Refreshing the session
+ * is left to Better Auth's get-session, which can also re-issue the cookie.
+ */
+export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
+  c.set('currentUser', await loadCurrentUser(c.var.deps.auth, c.req.raw.headers));
+  await next();
+});
+
+/** The same, and the user must be an admin. */
+export const requireAdmin = createMiddleware<SessionEnv>(async (c, next) => {
+  const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
+  if (currentUser.role !== 'admin') {
+    throw new ApiError(403, 'admin_required', 'Only admins can do this.');
+  }
+  c.set('currentUser', currentUser);
+  await next();
+});

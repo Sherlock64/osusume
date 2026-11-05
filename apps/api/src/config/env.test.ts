@@ -4,6 +4,7 @@ import { EnvValidationError, loadDatabaseEnv, loadEnv } from './env.ts';
 const valid = {
   DATABASE_URL: 'postgres://user:secret-password@localhost:5432/osusume',
   PUBLIC_BASE_URL: 'http://localhost:5173/',
+  AUTH_SECRET: 'a-test-secret-that-is-at-least-32-characters',
   IMAGE_STORAGE_PATH: '/var/lib/osusume/images',
   SMTP_HOST: 'localhost',
   SMTP_PORT: '1025',
@@ -28,6 +29,7 @@ describe('loadEnv', () => {
       HOST: '0.0.0.0',
       PORT: 3000,
       PUBLIC_BASE_URL: 'http://localhost:5173',
+      AUTH_SECRET: valid.AUTH_SECRET,
       IMAGE_STORAGE_PATH: valid.IMAGE_STORAGE_PATH,
       SMTP_HOST: 'localhost',
       SMTP_PORT: 1025,
@@ -41,6 +43,7 @@ describe('loadEnv', () => {
     for (const name of [
       'DATABASE_URL',
       'PUBLIC_BASE_URL',
+      'AUTH_SECRET',
       'IMAGE_STORAGE_PATH',
       'SMTP_HOST',
       'SMTP_PORT',
@@ -77,6 +80,12 @@ describe('loadEnv', () => {
     expect(loadEnv({ ...valid, SMTP_USER: 'someone', SMTP_PASSWORD: 'x' }).SMTP_USER).toBe(
       'someone',
     );
+  });
+
+  it('rejects a short auth secret without echoing it', () => {
+    const message = messageFor({ ...valid, AUTH_SECRET: 'too-short' });
+    expect(message).toContain('AUTH_SECRET');
+    expect(message).not.toContain('too-short');
   });
 
   it('rejects a non-http public base URL', () => {

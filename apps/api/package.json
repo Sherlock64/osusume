@@ -21,13 +21,16 @@
     "@hono/node-server": "^2.1.6",
     "@hono/zod-openapi": "^1.6.3",
     "@osusume/shared": "workspace:*",
+    "better-auth": "1.7.17",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.16",
+    "nodemailer": "^10.3.1",
     "pg": "^8.23.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
+    "@types/nodemailer": "^8.0.2",
     "@types/pg": "^8.23.1",
     "drizzle-kit": "^0.31.11",
     "typescript": "~6.0.0",
