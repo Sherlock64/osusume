@@ -455,32 +455,52 @@ describe('POST /invites/{token}/accept', () => {
     expect(dead.body).toEqual((await accept('not-a-real-token')).body);
   });
 
-  it('tells a logged-in admin the specific reason', async () => {
-    const asAdmin = (token: string) =>
-      t.request(
-        'POST',
-        `/api/v1/invites/${encodeURIComponent(token)}/accept`,
-        { username: uniqueUsername('New'), password: PASSWORD },
-        { cookie: admin.cookie },
-      );
-    const banned = await approvedInvite();
-    await t.db.insert(emailBlacklist).values({ email: banned.email });
-    expectError(await asAdmin(banned.token), 409, 'email_blacklisted');
-    const taken = await approvedInvite();
-    await t.seedUser({ email: taken.email });
-    expectError(await asAdmin(taken.token), 409, 'email_in_use');
-  });
+  describe('gives one answer for every link that cannot be accepted', () => {
+    const dead: [string, () => Promise<string>][] = [
+      ['unknown', () => Promise.resolve('not-a-real-token')],
+      ['used', async () => {
+        const { token } = await approvedInvite();
+        expect((await accept(token)).status).toBe(201);
+        return token;
+      }],
+      ['expired', async () => {
+        const { id, token } = await approvedInvite();
+        await t.db
+          .update(inviteRequest)
+          .set({ expiresAt: new Date(Date.now() - 1000) })
+          .where(eq(inviteRequest.id, id));
+        return token;
+      }],
+      ['revoked', async () => {
+        const { id, token } = await approvedInvite();
+        await t.request('POST', `/api/v1/admin/invite-requests/${id}/revoke`, undefined, { cookie: admin.cookie });
+        return token;
+      }],
+      ['blacklisted since approval', async () => {
+        const { email, token } = await approvedInvite();
+        await t.db.insert(emailBlacklist).values({ email });
+        return token;
+      }],
+      ['registered since approval', async () => {
+        const { email, token } = await approvedInvite();
+        await t.seedUser({ email });
+        return token;
+      }],
+    ];
 
-  it('does not treat a member session as an admin one', async () => {
-    const { email, token } = await approvedInvite();
-    await t.seedUser({ email });
-    const response = await t.request(
-      'POST',
-      `/api/v1/invites/${encodeURIComponent(token)}/accept`,
-      { username: uniqueUsername('New'), password: PASSWORD },
-      { cookie: member.cookie },
-    );
-    expectError(response, 404, 'invite_invalid');
+    it.each(dead)('%s, for anyone, an admin included', async (_label, make) => {
+      const token = await make();
+      const callers = [undefined, member.cookie, admin.cookie];
+      const body = { username: uniqueUsername('New'), password: PASSWORD };
+      const path = `/api/v1/invites/${encodeURIComponent(token)}/accept`;
+      const reference = await accept('not-a-real-token');
+      expectError(reference, 404, 'invite_invalid');
+      for (const cookie of callers) {
+        const response = await t.request('POST', path, body, { cookie });
+        expect(response.status).toBe(reference.status);
+        expect(response.text).toBe(reference.text);
+      }
+    });
   });
 
   it.each([
@@ -558,7 +578,12 @@ describe('GET /invites/{token}', () => {
     ]) {
       const response = await preview(token);
       expect(response.status).toBe(200);
-      expect(response.body).toEqual(INVALID);
+      expect(response.text).toBe(unknown.text);
+      expect(response.headers.get('cache-control')).toBe(unknown.headers.get('cache-control'));
+      const asAdmin = await t.request('GET', `/api/v1/invites/${encodeURIComponent(token)}`, undefined, {
+        cookie: admin.cookie,
+      });
+      expect(asAdmin.text).toBe(unknown.text);
     }
   });
 

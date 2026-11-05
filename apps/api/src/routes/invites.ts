@@ -39,7 +39,7 @@ import {
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { callerIsAdmin, requireAdmin, requireSession } from '../middleware/auth.ts';
+import { requireAdmin, requireSession } from '../middleware/auth.ts';
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
@@ -369,7 +369,7 @@ export const inviteRoutes = createRouter()
     if (!found) throw inviteInvalid();
     const passwordHash = await hashPassword(auth, password);
 
-    // A registered or banned address looks like any other dead link, except to an admin.
+    // A registered or banned address looks like any other dead link, to everyone.
     let created;
     try {
       created = await refusingTakenUsername(() =>
@@ -403,9 +403,7 @@ export const inviteRoutes = createRouter()
         }),
       );
     } catch (error) {
-      if (isAddressRefusal(error) && !(await callerIsAdmin(auth, c.req.raw.headers))) {
-        throw inviteInvalid();
-      }
+      if (isAddressRefusal(error)) throw inviteInvalid();
       throw error;
     }
     return c.json(toAccount(created), 201);
