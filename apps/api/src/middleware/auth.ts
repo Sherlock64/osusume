@@ -3,7 +3,12 @@ import { createMiddleware } from 'hono/factory';
 import type { Auth } from '../auth/auth.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError } from '../lib/errors.ts';
-import { PASSWORD_CHECK_LIMIT, consumeAttempt } from '../lib/rate-limit.ts';
+import {
+  INVITE_REQUEST_LIMIT,
+  PASSWORD_CHECK_LIMIT,
+  type RateLimitRule,
+  consumeAttempt,
+} from '../lib/rate-limit.ts';
 
 export interface CurrentUser {
   id: string;
@@ -56,24 +61,40 @@ export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
   await next();
 });
 
+/** requireSession that also counts the request against the user's bucket, before reading the body. */
+const requireSessionLimited = (bucket: string, rule: RateLimitRule) =>
+  createMiddleware<SessionEnv>(async (c, next) => {
+    const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
+    const retryAfter = consumeAttempt(`${bucket}:${currentUser.id}`, rule);
+    if (retryAfter !== null) {
+      const body: ErrorResponse = {
+        error: { code: 'rate_limited', message: 'Too many attempts. Please try again later.' },
+      };
+      return c.json(body, 429, { 'X-Retry-After': String(retryAfter) });
+    }
+    c.set('currentUser', currentUser);
+    await next();
+    return undefined;
+  });
+
 /**
  * requireSession for a route that checks the current password, limited per user across all
  * such routes so a stolen session cannot guess it. The login and change-password endpoints
  * have the equivalent from Better Auth. Per process: see lib/rate-limit.ts.
  */
-export const requireSessionForPasswordCheck = createMiddleware<SessionEnv>(async (c, next) => {
-  const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
-  const retryAfter = consumeAttempt(`password-check:${currentUser.id}`, PASSWORD_CHECK_LIMIT);
-  if (retryAfter !== null) {
-    const body: ErrorResponse = {
-      error: { code: 'rate_limited', message: 'Too many attempts. Please try again later.' },
-    };
-    return c.json(body, 429, { 'X-Retry-After': String(retryAfter) });
-  }
-  c.set('currentUser', currentUser);
-  await next();
-  return undefined;
-});
+export const requireSessionForPasswordCheck = requireSessionLimited(
+  'password-check',
+  PASSWORD_CHECK_LIMIT,
+);
+
+/**
+ * requireSession for requesting an invite. The limit applies before the address is read, so
+ * hitting it says nothing about any address. Per process: see lib/rate-limit.ts.
+ */
+export const requireSessionForInviteRequest = requireSessionLimited(
+  'invite-request',
+  INVITE_REQUEST_LIMIT,
+);
 
 /** The same as requireSession, and the user must be an admin. */
 export const requireAdmin = createMiddleware<SessionEnv>(async (c, next) => {

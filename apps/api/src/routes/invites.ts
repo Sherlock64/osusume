@@ -35,11 +35,12 @@ import {
   emailFailed,
   invalidRequest,
   notFound,
+  rateLimited,
   sessionSecurity,
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { requireAdmin, requireSession } from '../middleware/auth.ts';
+import { requireAdmin, requireSessionForInviteRequest } from '../middleware/auth.ts';
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
@@ -85,7 +86,7 @@ const createRequestRoute = createRoute({
   path: '/invite-requests',
   summary: 'Request an invite for an email address',
   security: sessionSecurity,
-  middleware: requireSession,
+  middleware: requireSessionForInviteRequest,
   request: {
     body: { required: true, content: { 'application/json': { schema: createInviteRequestSchema } } },
   },
@@ -98,6 +99,7 @@ const createRequestRoute = createRoute({
     ...invalidRequest,
     ...unauthenticated,
     409: { description: 'Admins only: why the address was refused', content: conflict[409].content },
+    ...rateLimited,
   },
 });
 

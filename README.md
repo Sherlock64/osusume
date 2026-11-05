@@ -56,7 +56,9 @@ overwrite the header rather than append to it.
 That limiter counts per client IP on `/api/auth`. Other routes that check a password
 (`POST /me/email`, `DELETE /me`) use `requireSessionForPasswordCheck`, which allows 3 attempts per
 10 seconds per user. Both keep their counts in memory: they reset on restart, and each api process
-counts separately, so running N instances allows N times the attempts.
+counts separately, so running N instances allows N times the attempts. `POST /invite-requests` uses
+the same limiter with its own bucket, 10 requests per hour per logged-in user, admins included. It
+runs before the address is read, so a 429 says nothing about any address.
 
 Answers about an address give nothing away. A non-admin always gets the same success from
 `POST /invite-requests`, including for an address with an account, on the blacklist or with an open

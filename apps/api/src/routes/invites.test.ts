@@ -1,8 +1,9 @@
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Transaction } from '../db/client.ts';
 import { emailBlacklist, inviteRequest, user } from '../db/schema.ts';
 import { lockEmails } from '../lib/locks.ts';
+import { INVITE_REQUEST_LIMIT, clearAttempts } from '../lib/rate-limit.ts';
 import { hashToken } from '../lib/tokens.ts';
 import { mailsTo, tokenFrom, waitForMail } from '../test-support/mailpit.ts';
 import {
@@ -28,6 +29,9 @@ beforeAll(async () => {
 afterAll(async () => {
   await t.cleanup();
 });
+
+// Requests made as setup would otherwise add up to the limit across a whole file.
+beforeEach(clearAttempts);
 
 const SENT = { message: 'Request sent to the admins' };
 
@@ -199,6 +203,70 @@ describe('POST /invite-requests', () => {
       .where(eq(inviteRequest.inviteeEmail, email));
     await Promise.all(Array.from({ length: 6 }, () => ask(email)));
     expect((await rowsFor(email)).filter((row) => row.status === 'pending')).toHaveLength(1);
+  });
+});
+
+describe('the limit on POST /invite-requests', () => {
+  const fill = async (cookie: string) => {
+    for (let i = 0; i < INVITE_REQUEST_LIMIT.max; i += 1) {
+      expect((await ask(uniqueEmail('filler'), cookie)).status).toBe(202);
+    }
+  };
+
+  it('allows ten an hour', () => {
+    expect(INVITE_REQUEST_LIMIT).toEqual({ windowSeconds: 3600, max: 10 });
+  });
+
+  it('gives the same 429 whatever the address, creating nothing', async () => {
+    const someone = await t.seedLoggedIn();
+    await fill(someone.cookie);
+    const free = uniqueEmail('free');
+    const banned = uniqueEmail('blacklisted');
+    await t.db.insert(emailBlacklist).values({ email: banned });
+    const open = await requestInvite();
+    const responses = [
+      await ask(free, someone.cookie),
+      await ask((await t.seedUser()).email, someone.cookie),
+      await ask(banned, someone.cookie),
+      await ask(open.email, someone.cookie),
+    ];
+    for (const response of responses) {
+      expectError(response, 429, 'rate_limited');
+      expect(response.text).toBe(responses[0]?.text);
+      expect(Number(response.headers.get('x-retry-after'))).toBeGreaterThan(0);
+    }
+    expect(await rowsFor(free)).toEqual([]);
+  });
+
+  it('counts refused and accepted requests alike', async () => {
+    const someone = await t.seedLoggedIn();
+    const registered = await t.seedUser();
+    for (let i = 0; i < INVITE_REQUEST_LIMIT.max; i += 1) {
+      const email = i % 2 === 0 ? registered.email : uniqueEmail('filler');
+      expect((await ask(email, someone.cookie)).status).toBe(202);
+    }
+    expectError(await ask(uniqueEmail('free'), someone.cookie), 429, 'rate_limited');
+  });
+
+  it('counts each member separately', async () => {
+    const someone = await t.seedLoggedIn();
+    await fill(someone.cookie);
+    expect((await ask(uniqueEmail('free'))).status).toBe(202);
+  });
+
+  it('has its own bucket, which the password limit does not use up', async () => {
+    const someone = await t.seedLoggedIn();
+    const wrongPassword = () =>
+      t.request(
+        'POST',
+        '/api/v1/me/email',
+        { currentPassword: 'wrong password', newEmail: uniqueEmail('unsent') },
+        { cookie: someone.cookie },
+      );
+    for (let i = 0; i < 3; i += 1) expectError(await wrongPassword(), 403, 'invalid_password');
+    expectError(await wrongPassword(), 429, 'rate_limited');
+    await fill(someone.cookie);
+    expectError(await ask(uniqueEmail('free'), someone.cookie), 429, 'rate_limited');
   });
 });
 
