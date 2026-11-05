@@ -552,7 +552,13 @@ describe('suggested tags at review', () => {
     const name = unique('Brand New Tag');
     const other = unique('Declined Tag');
     const title = unique('Accepting series');
-    const { id } = await filed(newSeries({ series: { title }, suggestedTags: [name, other] }));
+    const { id } = await filed(
+      newSeries({
+        series: { title },
+        seasons: [{ ordinal: 1, title: 'One' }],
+        suggestedTags: [name, other],
+      }),
+    );
     const response = await decide(id, { decision: 'approve', acceptSuggestedTags: [name.toUpperCase()] });
     expect(response.status).toBe(200);
     const [created] = await tagsNamed(name);
@@ -561,7 +567,11 @@ describe('suggested tags at review', () => {
     const detail = await t.request('GET', `/api/v1/series/${(response.body as RequestBody).seriesId ?? ''}`, undefined, {
       cookie: member.cookie,
     });
-    expect(detail.body).toMatchObject({ title, tags: [{ id: created?.id, name }] });
+    expect(detail.body).toMatchObject({
+      title,
+      tags: [{ id: created?.id, name }],
+      seasons: [{ ownTags: [] }],
+    });
   });
 
   it('attach the existing tag matching ignoring case, keeping its spelling', async () => {
@@ -578,15 +588,28 @@ describe('suggested tags at review', () => {
   it('attach to the added season, leaving the series and its other seasons alone', async () => {
     const name = unique('Season Suggestion');
     const target = await makeSeries();
+    const earlier = await t.request(
+      'POST',
+      '/api/v1/seasons',
+      { seriesId: target.id, ordinal: 1, title: 'Earlier' },
+      { cookie: admin.cookie },
+    );
+    expect(earlier.status).toBe(201);
     const { id } = await filed({
       kind: 'add_season',
       seriesId: target.id,
-      season: { ordinal: 1, title: 'x' },
+      season: { ordinal: 2, title: 'x' },
       suggestedTags: [name],
     });
     await decide(id, { decision: 'approve', acceptSuggestedTags: [name] });
     const detail = await t.request('GET', `/api/v1/series/${target.id}`, undefined, { cookie: member.cookie });
-    expect(detail.body).toMatchObject({ tags: [], seasons: [{ ownTags: [{ name }] }] });
+    expect(detail.body).toMatchObject({
+      tags: [],
+      seasons: [
+        { ordinal: 1, ownTags: [] },
+        { ordinal: 2, ownTags: [{ name }] },
+      ],
+    });
   });
 
   it('go alongside tags chosen by hand in an edit, with no repeat', async () => {
