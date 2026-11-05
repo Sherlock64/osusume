@@ -4,6 +4,7 @@ import { createApp } from './app.ts';
 import { createAuth } from './auth/auth.ts';
 import { EnvValidationError, loadEnv } from './config/env.ts';
 import { createDatabase } from './db/client.ts';
+import { createVolumeImageStorage } from './lib/image-storage.ts';
 import { createSmtpMailer } from './lib/mailer.ts';
 
 let env;
@@ -31,6 +32,7 @@ const app = createApp({
   db,
   auth,
   mailer,
+  imageStorage: createVolumeImageStorage(env.IMAGE_STORAGE_PATH),
   publicBaseUrl: env.PUBLIC_BASE_URL,
 });
 

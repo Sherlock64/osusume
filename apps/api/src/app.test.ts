@@ -10,6 +10,7 @@ function appWith(checkDatabase: () => Promise<void>) {
     db: harness.db,
     auth: harness.auth,
     mailer: { send: () => Promise.resolve() },
+    imageStorage: harness.imageStorage,
     publicBaseUrl: 'http://osusume.test',
   });
 }
@@ -69,6 +70,8 @@ describe('OpenAPI document', () => {
       '/catalog-requests',
       '/health',
       '/health/ready',
+      '/images',
+      '/images/{id}/{size}',
       '/invite-requests',
       '/invites/{token}',
       '/invites/{token}/accept',

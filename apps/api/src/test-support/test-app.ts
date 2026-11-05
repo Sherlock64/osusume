@@ -1,8 +1,12 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { expect } from 'vitest';
 import { createApp } from '../app.ts';
 import { insertAccount } from '../auth/accounts.ts';
 import { createAuth } from '../auth/auth.ts';
+import { createVolumeImageStorage } from '../lib/image-storage.ts';
 import { type Mailer, createSmtpMailer } from '../lib/mailer.ts';
 import { testSmtpEnv } from './mailpit.ts';
 import { createMigratedDatabase } from './scratch-database.ts';
@@ -47,7 +51,13 @@ export interface TestResponse {
  */
 export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: string } = {}) {
   const publicBaseUrl = options.publicBaseUrl ?? PUBLIC_BASE_URL;
-  const { db, pool, cleanup } = await createMigratedDatabase();
+  const { db, pool, cleanup: dropDatabase } = await createMigratedDatabase();
+  const imageDirectory = await mkdtemp(join(tmpdir(), 'osusume-images-'));
+  const imageStorage = createVolumeImageStorage(imageDirectory);
+  const cleanup = async () => {
+    await dropDatabase();
+    await rm(imageDirectory, { recursive: true, force: true });
+  };
   const mailer = options.mailer ?? createSmtpMailer(testSmtpEnv);
   const auth = createAuth({
     db,
@@ -60,6 +70,7 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
     db,
     auth,
     mailer,
+    imageStorage,
     publicBaseUrl,
   });
   const passwordHash = await (await auth.$context).password.hash(PASSWORD);
@@ -79,6 +90,34 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
         ...(requestOptions.cookie === undefined ? {} : { cookie: requestOptions.cookie }),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    const text = await response.text();
+    let parsed: unknown = text;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      // Not JSON; tests see the raw text.
+    }
+    return { status: response.status, body: parsed, headers: response.headers };
+  }
+
+  /** Uploads a file as multipart form data, declaring the given type and name. */
+  async function upload(
+    bytes: Uint8Array,
+    options: { cookie?: string; type?: string; name?: string; field?: string } = {},
+  ): Promise<TestResponse> {
+    const form = new FormData();
+    const file = new File([Buffer.from(bytes)], options.name ?? 'upload.png', {
+      type: options.type ?? 'image/png',
+    });
+    form.append(options.field ?? 'file', file);
+    const response = await app.request(`${publicBaseUrl}/api/v1/images`, {
+      method: 'POST',
+      headers: {
+        origin: publicBaseUrl,
+        ...(options.cookie === undefined ? {} : { cookie: options.cookie }),
+      },
+      body: form,
     });
     const text = await response.text();
     let parsed: unknown = text;
@@ -124,7 +163,7 @@ export async function createTestApp(options: { mailer?: Mailer; publicBaseUrl?: 
     return { ...row, cookie: await login(row.enteredUsername) };
   }
 
-  return { app, db, pool, auth, request, login, seedUser, seedLoggedIn, cleanup };
+  return { app, db, pool, auth, imageDirectory, imageStorage, request, upload, login, seedUser, seedLoggedIn, cleanup };
 }
 
 /** Asserts a refusal in the api's error shape. */

@@ -1,5 +1,6 @@
 import type { Auth } from '../auth/auth.ts';
 import type { Database } from '../db/client.ts';
+import type { ImageStorage } from './image-storage.ts';
 import type { Mailer } from './mailer.ts';
 
 export interface AppDependencies {
@@ -8,6 +9,7 @@ export interface AppDependencies {
   db: Database;
   auth: Auth;
   mailer: Mailer;
+  imageStorage: ImageStorage;
   /** Base URL users reach the site at, with no trailing slash. */
   publicBaseUrl: string;
 }

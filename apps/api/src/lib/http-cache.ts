@@ -17,3 +17,9 @@ function cacheHeaders(cacheControl: string) {
  * is refused. An unchanged response costs a 304, not the body.
  */
 export const revalidatedRead = [cacheHeaders('private, no-cache'), etag()] as const;
+
+/**
+ * For content that never changes under its URL, after the auth middleware. Only the browser may
+ * store it. The route sets its own ETag and answers 304 itself.
+ */
+export const immutableRead = cacheHeaders('private, max-age=604800, immutable');

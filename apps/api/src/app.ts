@@ -8,6 +8,7 @@ import { adminUserRoutes } from './routes/admin-users.ts';
 import { catalogRequestRoutes } from './routes/catalog-requests.ts';
 import { catalogRoutes } from './routes/catalog.ts';
 import { healthRoutes } from './routes/health.ts';
+import { imageRoutes } from './routes/images.ts';
 import { inviteRoutes } from './routes/invites.ts';
 import { meRoutes } from './routes/me.ts';
 import { setupRoutes } from './routes/setup.ts';
@@ -32,7 +33,8 @@ export function createApp(dependencies: AppDependencies) {
     .route('/', usernameChangeRoutes)
     .route('/', adminUserRoutes)
     .route('/', catalogRoutes)
-    .route('/', catalogRequestRoutes);
+    .route('/', catalogRequestRoutes)
+    .route('/', imageRoutes);
 
   routes.openAPIRegistry.registerComponent('securitySchemes', 'session', {
     type: 'apiKey',

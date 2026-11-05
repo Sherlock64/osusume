@@ -61,6 +61,24 @@ counts separately, so running N instances allows N times the attempts.
 Routes that need a login use `requireSession` or `requireAdmin` from
 `apps/api/src/middleware/auth.ts` as their `middleware`, then read `c.var.currentUser`.
 
+## Catalog
+
+Members read the catalog and file requests; only admins write to it. `GET /series` lists newest
+first by each series' earliest dated season, with blank dates last, or best match first when
+searching. Catalog reads carry `Cache-Control: private, no-cache` and an ETag, so the browser asks
+again each time, which rechecks the session, and an unchanged response costs a 304.
+
+Writes that span rows take `lockCatalog` from `apps/api/src/lib/locks.ts`, before any row lock.
+
+## Images
+
+Uploads are validated by content, resized with sharp and re-encoded as WebP, which drops metadata
+such as EXIF location. They are stored under `IMAGE_STORAGE_PATH` through the `ImageStorage`
+interface in `apps/api/src/lib/image-storage.ts`; the volume is the only backend. The upload limit
+and named sizes are set in `packages/shared/src/catalog.ts`, the accepted formats in
+`apps/api/src/lib/image-processing.ts`. An image's URL never changes content, so reads are cached
+privately for a week.
+
 ## Database
 
 - Change `apps/api/src/db/schema.ts`, then run `pnpm db:generate` and commit the new
