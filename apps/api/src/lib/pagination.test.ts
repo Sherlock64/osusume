@@ -1,11 +1,11 @@
 import { z } from 'zod';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { and, gte } from 'drizzle-orm';
+import { and, gte, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { tag } from '../db/schema.ts';
 import { createMigratedDatabase } from '../test-support/scratch-database.ts';
 import { ApiError } from './errors.ts';
-import { decodeCursor, encodeCursor, keyset, toPage } from './pagination.ts';
+import { decodeCursor, encodeCursor, keyset, keysetBy, toPage } from './pagination.ts';
 
 const id = '3f2b8c1e-8a55-4a57-9a10-0c8d7f6e5d4c';
 
@@ -108,6 +108,33 @@ describe('keyset on a real Postgres', () => {
     } while (cursor !== undefined);
     return { seen, sizes };
   }
+
+  it('walks computed terms in mixed directions without gaps or repeats', async () => {
+    // Two groups of a computed, non-null key: names ending in an even digit, then odd.
+    const group = sql<number>`(right(${tag.name}, 1)::int % 2)`;
+    const seen: string[] = [];
+    let values: unknown[] | undefined;
+    do {
+      const page = keysetBy(
+        [
+          { expression: group, type: 'integer', direction: 'asc' },
+          { expression: tag.name, type: 'text', direction: 'desc' },
+          { expression: tag.id, type: 'uuid', direction: 'asc' },
+        ],
+        values,
+      );
+      const rows = await db
+        .select({ id: tag.id, name: tag.name, group: sql<number>`${group}` })
+        .from(tag)
+        .where(and(gte(tag.createdAt, since), page.where))
+        .orderBy(...page.orderBy)
+        .limit(3);
+      seen.push(...rows.map((row) => row.name));
+      const last = rows.at(-1);
+      values = last && rows.length === 3 ? [last.group, last.name, last.id] : undefined;
+    } while (values !== undefined);
+    expect(seen).toEqual(['tag-6', 'tag-4', 'tag-2', 'tag-0', 'tag-5', 'tag-3', 'tag-1']);
+  });
 
   it.each(['asc', 'desc'] as const)('walks a timestamp column %s without gaps or repeats', async (direction) => {
     const { seen, sizes } = await walk(tag.createdAt, z.coerce.date(), (row) => row.createdAt, direction);

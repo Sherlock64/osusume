@@ -10,7 +10,9 @@ export interface Cursor<Sort> {
   id: string;
 }
 
-export function encodeCursor(cursor: Cursor<string | number | Date>): string {
+type CursorSort = string | number | Date | readonly (string | number)[];
+
+export function encodeCursor(cursor: Cursor<CursorSort>): string {
   const sort = cursor.sort instanceof Date ? cursor.sort.toISOString() : cursor.sort;
   return Buffer.from(JSON.stringify([sort, cursor.id]), 'utf8').toString('base64url');
 }
@@ -62,11 +64,46 @@ export function keyset<Sort>(options: {
   };
 }
 
+/** One sort position of `keysetBy`: an expression that is never null, and its Postgres type. */
+export interface SortTerm {
+  expression: AnyColumn | SQL;
+  type: 'integer' | 'text' | 'uuid';
+  direction: SortDirection;
+}
+
+/**
+ * Keyset pagination over several sort terms with their own directions, for computed sort keys.
+ * The last term must be unique, normally the id. `values` holds the cursor's value for each term.
+ * A nullable value cannot be compared this way, so turn it into a key with a place for blanks,
+ * for example coalesce(year, 0) to sort blank years last in a descending list.
+ */
+export function keysetBy(
+  terms: readonly SortTerm[],
+  values?: readonly unknown[],
+): { where: SQL | undefined; orderBy: SQL[] } {
+  const orderBy = terms.map((term) =>
+    term.direction === 'asc' ? asc(term.expression) : desc(term.expression),
+  );
+  if (values === undefined) return { where: undefined, orderBy };
+
+  const param = (index: number, term: SortTerm) =>
+    sql`${values[index]}::${sql.raw(term.type)}`;
+  // (a after x) OR (a = x AND b after y) OR (a = x AND b = y AND c after z)
+  const branches = terms.map((term, index) => {
+    const comparison = term.direction === 'asc' ? sql.raw('>') : sql.raw('<');
+    const equalBefore = terms
+      .slice(0, index)
+      .map((earlier, earlierIndex) => sql`${earlier.expression} = ${param(earlierIndex, earlier)} AND `);
+    return sql`(${sql.join(equalBefore)}${term.expression} ${comparison} ${param(index, term)})`;
+  });
+  return { where: sql`(${sql.join(branches, sql` OR `)})`, orderBy };
+}
+
 /** Turns `limit + 1` fetched rows into the response envelope. */
 export function toPage<Row>(
   rows: readonly Row[],
   limit: number,
-  cursorOf: (row: Row) => Cursor<string | number | Date>,
+  cursorOf: (row: Row) => Cursor<CursorSort>,
 ): { items: Row[]; nextCursor: string | null } {
   const items = rows.slice(0, limit);
   const last = items.at(-1);

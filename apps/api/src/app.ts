@@ -5,6 +5,8 @@ import { exposedAuthEndpoints } from './auth/auth.ts';
 import type { AppDependencies, AppEnv } from './lib/context.ts';
 import { ApiError } from './lib/errors.ts';
 import { adminUserRoutes } from './routes/admin-users.ts';
+import { catalogRequestRoutes } from './routes/catalog-requests.ts';
+import { catalogRoutes } from './routes/catalog.ts';
 import { healthRoutes } from './routes/health.ts';
 import { inviteRoutes } from './routes/invites.ts';
 import { meRoutes } from './routes/me.ts';
@@ -28,7 +30,9 @@ export function createApp(dependencies: AppDependencies) {
     .route('/', inviteRoutes)
     .route('/', meRoutes)
     .route('/', usernameChangeRoutes)
-    .route('/', adminUserRoutes);
+    .route('/', adminUserRoutes)
+    .route('/', catalogRoutes)
+    .route('/', catalogRequestRoutes);
 
   routes.openAPIRegistry.registerComponent('securitySchemes', 'session', {
     type: 'apiKey',

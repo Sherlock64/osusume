@@ -12,6 +12,8 @@ export class ApiError extends Error {
 }
 
 const UNIQUE_VIOLATION = '23505';
+// Postgres reports ON DELETE RESTRICT as either, depending on the version.
+const FOREIGN_KEY_VIOLATIONS = ['23503', '23001'];
 
 /** Whether a failed query broke a unique constraint or index, optionally a specific one. */
 export function isUniqueViolation(error: unknown, constraint?: string): boolean {
@@ -19,5 +21,16 @@ export function isUniqueViolation(error: unknown, constraint?: string): boolean 
   const cause = error.cause as Error & { code?: string; constraint?: string };
   return (
     cause.code === UNIQUE_VIOLATION && (constraint === undefined || cause.constraint === constraint)
+  );
+}
+
+/** Whether a failed query broke a foreign key, optionally a specific one. */
+export function isForeignKeyViolation(error: unknown, constraint?: string): boolean {
+  if (!(error instanceof Error) || !(error.cause instanceof Error)) return false;
+  const cause = error.cause as Error & { code?: string; constraint?: string };
+  return (
+    cause.code !== undefined &&
+    FOREIGN_KEY_VIOLATIONS.includes(cause.code) &&
+    (constraint === undefined || cause.constraint === constraint)
   );
 }

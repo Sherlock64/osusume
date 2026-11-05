@@ -52,6 +52,8 @@ describe('OpenAPI document', () => {
     const document = (await response.json()) as { servers: unknown; paths: Record<string, unknown> };
     expect(document.servers).toEqual([{ url: '/api/v1' }]);
     expect(Object.keys(document.paths).sort()).toEqual([
+      '/admin/catalog-requests',
+      '/admin/catalog-requests/{id}/decision',
       '/admin/invite-requests',
       '/admin/invite-requests/{id}/decision',
       '/admin/invite-requests/{id}/revoke',
@@ -64,6 +66,7 @@ describe('OpenAPI document', () => {
       '/admin/users/{id}/enable',
       '/admin/users/{id}/promote',
       '/admin/users/{id}/remove',
+      '/catalog-requests',
       '/health',
       '/health/ready',
       '/invite-requests',
@@ -72,9 +75,15 @@ describe('OpenAPI document', () => {
       '/me',
       '/me/email',
       '/me/email/verify',
+      '/seasons',
+      '/seasons/{id}',
+      '/series',
+      '/series/{id}',
       '/setup',
       '/setup/status',
       '/setup/verify',
+      '/tags',
+      '/tags/{id}',
       '/username-change-requests',
     ]);
   });

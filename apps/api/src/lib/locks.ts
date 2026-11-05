@@ -23,3 +23,13 @@ export async function lockEmails(tx: Transaction, ...emails: string[]): Promise<
 export async function lockFirstRunSetup(tx: Transaction): Promise<void> {
   await lock(tx, 'first-run-setup');
 }
+
+/**
+ * Serializes catalog writes that span rows: filing and deciding requests, and admin writes to
+ * series, seasons and tags. It covers a request filed while its series or a tag it names is
+ * being deleted, and rules out deadlocks between them. Take it first, before any row lock.
+ * Catalog writes are rare and short, and reads never wait for it.
+ */
+export async function lockCatalog(tx: Transaction): Promise<void> {
+  await lock(tx, 'catalog');
+}

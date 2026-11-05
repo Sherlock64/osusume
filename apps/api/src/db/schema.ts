@@ -412,7 +412,7 @@ export const catalogRequest = pgTable(
     /** Null once the requester has been removed. */
     requesterId: uuid().references(() => user.id, { onDelete: 'set null' }),
     kind: catalogRequestKind().notNull(),
-    /** The series an add_season request targets; null for new_series. */
+    /** The series an add_season request targets, or the one a new_series approval created. */
     seriesId: uuid().references(() => series.id, { onDelete: 'set null' }),
     /** The full proposed entry. Holds catalog data only, never user identity. */
     payload: jsonb().notNull(),

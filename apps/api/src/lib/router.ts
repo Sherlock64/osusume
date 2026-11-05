@@ -35,6 +35,7 @@ export const adminOnly = {
 };
 export const notFound = { 404: errorResponse('Not found') };
 export const conflict = { 409: errorResponse('The current state does not allow this') };
+export const notModified = { 304: { description: 'Unchanged since the given ETag' } };
 export const rateLimited = { 429: errorResponse('Too many attempts; try again later') };
 export const emailFailed = { 503: errorResponse('The email could not be sent') };
 
