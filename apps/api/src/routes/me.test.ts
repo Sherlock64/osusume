@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   emailBlacklist,
   emailChangeRequest,
@@ -13,6 +13,7 @@ import { mailsTo, tokenFrom, waitForMail } from '../test-support/mailpit.ts';
 import {
   PASSWORD,
   type TestApp,
+  type TestResponse,
   createTestApp,
   expectError,
   uniqueEmail,
@@ -208,11 +209,16 @@ describe('changing email', () => {
   const start = (cookie: string, newEmail: string, currentPassword = PASSWORD) =>
     t.request('POST', '/api/v1/me/email', { currentPassword, newEmail }, { cookie });
   const verify = (token: string) => t.request('POST', '/api/v1/me/email/verify', { token });
+  const COMPLETED = { message: 'Request completed' };
+  const expectCompleted = (response: TestResponse) => {
+    expect(response.status).toBe(200);
+    expect(JSON.parse(response.text)).toEqual(COMPLETED);
+  };
 
   async function started() {
     const member = await t.seedLoggedIn();
     const newEmail = uniqueEmail('changed');
-    expect((await start(member.cookie, newEmail)).status).toBe(202);
+    expectCompleted(await start(member.cookie, newEmail));
     return { member, newEmail, token: tokenFrom(await waitForMail(newEmail)) };
   }
 
@@ -241,8 +247,7 @@ describe('changing email', () => {
 
     const response = await verify(token);
 
-    expect(response.status).toBe(200);
-    expect(response.body).toMatchObject({ email: newEmail });
+    expectCompleted(response);
     expect(await emailOf(member.id)).toBe(newEmail);
     expect(await t.db.select().from(emailChangeRequest).where(eq(emailChangeRequest.userId, member.id))).toEqual([]);
     // Logging in is by username, so it is unaffected.
@@ -271,7 +276,7 @@ describe('changing email', () => {
     expectError(await start(member.cookie, uniqueEmail('limited')), 429, 'rate_limited');
 
     const other = await t.seedLoggedIn();
-    expect((await start(other.cookie, uniqueEmail('unlimited'))).status).toBe(202);
+    expectCompleted(await start(other.cookie, uniqueEmail('unlimited')));
   });
 
   it('revokes open invites for the new address when it applies, and goes through', async () => {
@@ -332,46 +337,72 @@ describe('changing email', () => {
       (await t.db.select().from(inviteRequest).where(eq(inviteRequest.id, open?.id ?? '')))[0]?.status;
     expect(await pendingStatus()).toBe('pending');
     await t.db.insert(emailBlacklist).values({ email: newEmail });
-    expectError(await verify(token), 409, 'email_change_refused');
+    expectCompleted(await verify(token));
     expect(await pendingStatus()).toBe('pending');
   });
 
-  it('refuses a used, unknown or expired link', async () => {
+  it('answers the same for a used, unknown or expired link, changing nothing', async () => {
     const used = await started();
-    expect((await verify(used.token)).status).toBe(200);
-    expectError(await verify(used.token), 409, 'email_change_refused');
-    expectError(await verify('not-a-real-token'), 409, 'email_change_refused');
+    expectCompleted(await verify(used.token));
+    expectCompleted(await verify(used.token));
+    expectCompleted(await verify('not-a-real-token'));
 
     const expired = await started();
     await t.db
       .update(emailChangeRequest)
       .set({ expiresAt: new Date(Date.now() - 1000) })
       .where(eq(emailChangeRequest.userId, expired.member.id));
-    expectError(await verify(expired.token), 409, 'email_change_refused');
+    expectCompleted(await verify(expired.token));
     expect(await emailOf(expired.member.id)).toBe(expired.member.email);
+  });
+
+  it('still refuses a malformed token, which says nothing about any link', async () => {
+    expectError(await verify(''), 400, 'validation_error');
   });
 
   it('asking again replaces the earlier link', async () => {
     const { member, token } = await started();
     const another = uniqueEmail('changed-again');
-    expect((await start(member.cookie, another)).status).toBe(202);
+    expectCompleted(await start(member.cookie, another));
     const newest = tokenFrom(await waitForMail(another));
-    expectError(await verify(token), 409, 'email_change_refused');
-    expect((await verify(newest)).status).toBe(200);
+    expectCompleted(await verify(token));
+    expect(await emailOf(member.id)).toBe(member.email);
+    expectCompleted(await verify(newest));
     expect(await emailOf(member.id)).toBe(another);
   });
 
-  it('refuses an address in use or blacklisted, ignoring case', async () => {
+  describe('gives a member byte for byte the same answer when asking', () => {
+    it.each<[string, (member: { email: string }) => Promise<string>]>([
+      ['in use', async () => (await t.seedUser()).email.toUpperCase()],
+      ['their own', (member) => Promise.resolve(member.email)],
+      ['blacklisted', async () => {
+        const banned = uniqueEmail('banned');
+        await t.db.insert(emailBlacklist).values({ email: banned });
+        return banned.toUpperCase();
+      }],
+    ])('for an address %s as for one that goes ahead, and sends it nothing', async (_label, make) => {
+      const member = await t.seedLoggedIn();
+      const accepted = await start(member.cookie, uniqueEmail('accepted'));
+      const refusedMember = await t.seedLoggedIn();
+      const address = await make(refusedMember);
+      const delivered = (await mailsTo(address)).length;
+      const refused = await start(refusedMember.cookie, address);
+      expectCompleted(refused);
+      expect(refused.status).toBe(accepted.status);
+      expect(refused.text).toBe(accepted.text);
+      expect([...refused.headers.entries()]).toEqual([...accepted.headers.entries()]);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(await mailsTo(address)).toHaveLength(delivered);
+      expect(
+        await t.db.select().from(emailChangeRequest).where(eq(emailChangeRequest.userId, refusedMember.id)),
+      ).toEqual([]);
+    });
+  });
+
+  it('still reports a wrong password, and a malformed address', async () => {
     const member = await t.seedLoggedIn();
-    const other = await t.seedUser();
-    const taken = await start(member.cookie, other.email.toUpperCase());
-    expectError(taken, 409, 'email_change_refused');
-    expectError(await start(member.cookie, member.email), 409, 'email_change_refused');
-    const banned = uniqueEmail('banned');
-    await t.db.insert(emailBlacklist).values({ email: banned });
-    const refused = await start(member.cookie, banned.toUpperCase());
-    expect(refused.body).toEqual(taken.body);
-    expect(await mailsTo(banned)).toEqual([]);
+    expectError(await start(member.cookie, (await t.seedUser()).email, 'wrong password'), 403, 'invalid_password');
+    expectError(await start(member.cookie, 'not an email'), 400, 'validation_error');
   });
 
   it('tells an admin the specific reason when asking', async () => {
@@ -387,14 +418,29 @@ describe('changing email', () => {
     const taken = await started();
     await t.seedUser({ email: taken.newEmail });
     const refused = await verify(taken.token);
-    expectError(refused, 409, 'email_change_refused');
-    expect(refused.body).toEqual((await verify('not-a-real-token')).body);
+    expectCompleted(refused);
+    expect(refused.text).toBe((await verify('not-a-real-token')).text);
     expect(await emailOf(taken.member.id)).toBe(taken.member.email);
 
     const banned = await started();
     await t.db.insert(emailBlacklist).values({ email: banned.newEmail });
-    expectError(await verify(banned.token), 409, 'email_change_refused');
+    expectCompleted(await verify(banned.token));
     expect(await emailOf(banned.member.id)).toBe(banned.member.email);
+  });
+
+  it('answers a disabled account the same at click time, without applying', async () => {
+    const { member, token } = await started();
+    await t.db.update(user).set({ disabledAt: new Date() }).where(eq(user.id, member.id));
+    expectCompleted(await verify(token));
+    expect(await emailOf(member.id)).toBe(member.email);
+  });
+
+  it('answers a logged-in member the same as anyone at click time', async () => {
+    const taken = await started();
+    await t.seedUser({ email: taken.newEmail });
+    expectCompleted(
+      await t.request('POST', '/api/v1/me/email/verify', { token: taken.token }, { cookie: taken.member.cookie }),
+    );
   });
 
   it('tells a logged-in admin the specific reason at click time', async () => {
@@ -407,6 +453,15 @@ describe('changing email', () => {
     await t.db.insert(emailBlacklist).values({ email: banned.newEmail });
     expectError(await asAdmin(banned.token), 409, 'email_blacklisted');
     expectError(await asAdmin('not-a-real-token'), 404, 'token_invalid');
+    const disabled = await started();
+    await t.db.update(user).set({ disabledAt: new Date() }).where(eq(user.id, disabled.member.id));
+    expectError(await asAdmin(disabled.token), 403, 'account_disabled');
+  });
+
+  it('applies for a logged-in admin, with the same answer', async () => {
+    const { member, newEmail, token } = await started();
+    expectCompleted(await t.request('POST', '/api/v1/me/email/verify', { token }, { cookie: admin.cookie }));
+    expect(await emailOf(member.id)).toBe(newEmail);
   });
 
   it('gives an address to one of two people clicking at the same time', async () => {
@@ -419,7 +474,7 @@ describe('changing email', () => {
     await waitForMail(contested, 2);
     const mails = await mailsTo(contested);
     const responses = await Promise.all(mails.map((mail) => verify(tokenFrom(mail))));
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409]);
+    for (const response of responses) expectCompleted(response);
     const holders = await t.db.select().from(user).where(eq(user.email, contested));
     expect(holders).toHaveLength(1);
   });
@@ -461,32 +516,65 @@ describe('changing email', () => {
     expect(await canLogin(member.enteredUsername, PASSWORD)).toBe(true);
   });
 
-  it('refuses a link for an account disabled since', async () => {
-    const { member, token } = await started();
-    await t.db.update(user).set({ disabledAt: new Date() }).where(eq(user.id, member.id));
-    expectError(await verify(token), 403, 'account_disabled');
-    expect(await emailOf(member.id)).toBe(member.email);
+  describe('when the email cannot be sent', () => {
+    const failingApp = () =>
+      createTestApp({ mailer: { send: () => Promise.reject(new Error('smtp is down')) } });
+    const ask = (app: TestApp, cookie: string, newEmail: string) =>
+      app.request('POST', '/api/v1/me/email', { currentPassword: PASSWORD, newEmail }, { cookie });
+
+    it('answers a member as usual, logs it and drops the link', async () => {
+      const failing = await failingApp();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        const member = await failing.seedLoggedIn();
+        expectCompleted(await ask(failing, member.cookie, uniqueEmail('unsent')));
+        await vi.waitFor(async () => {
+          expect(await failing.db.select().from(emailChangeRequest)).toEqual([]);
+        });
+        expect(log).toHaveBeenCalledWith(expect.stringContaining('email change'), expect.any(Error));
+      } finally {
+        log.mockRestore();
+        await failing.cleanup();
+      }
+    });
+
+    it('tells an admin, keeping nothing', async () => {
+      const failing = await failingApp();
+      const log = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      try {
+        const asking = await failing.seedLoggedIn({ role: 'admin' });
+        expectError(await ask(failing, asking.cookie, uniqueEmail('unsent')), 503, 'email_failed');
+        expect(await failing.db.select().from(emailChangeRequest)).toEqual([]);
+      } finally {
+        log.mockRestore();
+        await failing.cleanup();
+      }
+    });
   });
 
-  it('keeps nothing when the email cannot be sent', async () => {
-    const failing = await createTestApp({
-      mailer: { send: () => Promise.reject(new Error('smtp is down')) },
+  it('does not make a member wait for the email, which would reveal the address is free', async () => {
+    let finish: () => void = () => undefined;
+    const blocked = await createTestApp({
+      mailer: {
+        send: () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      },
     });
     try {
-      const member = await failing.seedLoggedIn();
-      expectError(
-        await failing.request(
+      const member = await blocked.seedLoggedIn();
+      expectCompleted(
+        await blocked.request(
           'POST',
           '/api/v1/me/email',
-          { currentPassword: PASSWORD, newEmail: uniqueEmail('unsent') },
+          { currentPassword: PASSWORD, newEmail: uniqueEmail('slow') },
           { cookie: member.cookie },
         ),
-        503,
-        'email_failed',
       );
-      expect(await failing.db.select().from(emailChangeRequest)).toEqual([]);
     } finally {
-      await failing.cleanup();
+      finish();
+      await blocked.cleanup();
     }
   });
 });

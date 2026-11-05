@@ -123,6 +123,13 @@ export type AcceptInvite = z.infer<typeof acceptInviteSchema>;
 
 /* Own account */
 
+/**
+ * All a non-admin hears from starting or finishing an email change, once the password is correct:
+ * nothing in it says whether the change went ahead.
+ */
+export const requestCompletedResponseSchema = z.object({ message: z.literal('Request completed') });
+export type RequestCompletedResponse = z.infer<typeof requestCompletedResponseSchema>;
+
 export const changeEmailSchema = z.object({
   currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
   newEmail: emailSchema,

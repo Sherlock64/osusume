@@ -231,7 +231,9 @@ describe('disable and enable', () => {
     await act(member.id, 'disable');
 
     expect((await t.request('POST', '/api/auth/reset-password', { token: resetToken, newPassword: 'another password' })).status).toBe(400);
-    expectError(await t.request('POST', '/api/v1/me/email/verify', { token: emailToken }), 409, 'email_change_refused');
+    expect((await t.request('POST', '/api/v1/me/email/verify', { token: emailToken })).body).toEqual({
+      message: 'Request completed',
+    });
     expect(await t.db.select().from(emailChangeRequest).where(eq(emailChangeRequest.userId, member.id))).toEqual([]);
 
     await t.request('POST', '/api/auth/request-password-reset', { email: member.email });
@@ -395,9 +397,9 @@ describe('an address wanted by both an email change and an invite', () => {
     const member = await t.seedLoggedIn();
     await t.request('POST', '/api/v1/me/email', { currentPassword: PASSWORD, newEmail: contested }, { cookie: member.cookie });
     const changeToken = tokenFrom(await waitForMail(contested));
-    const created = await t.request('POST', '/api/v1/invite-requests', { email: contested }, { cookie: admin.cookie });
-    const { id } = created.body as { id: string };
-    await t.request('POST', `/api/v1/admin/invite-requests/${id}/decision`, { decision: 'approve' }, { cookie: admin.cookie });
+    await t.request('POST', '/api/v1/invite-requests', { email: contested }, { cookie: admin.cookie });
+    const [open] = await t.db.select().from(inviteRequest).where(eq(inviteRequest.inviteeEmail, contested));
+    await t.request('POST', `/api/v1/admin/invite-requests/${open?.id ?? ''}/decision`, { decision: 'approve' }, { cookie: admin.cookie });
     const inviteToken = tokenFrom(await waitForMail(contested, 2));
 
     const responses = await Promise.all([
@@ -408,9 +410,12 @@ describe('an address wanted by both an email change and an invite', () => {
       }),
     ]);
 
-    // Whichever goes first decides: the change revokes the invite, or the account takes the address.
+    // Whichever goes first decides: the change revokes the invite, or the account takes the
+    // address. The link holder hears the same either way, so only the rows tell them apart.
     const [changed, accepted] = responses.map((response) => response.status);
-    expect([[200, 404], [409, 201]]).toContainEqual([changed, accepted]);
+    expect(changed).toBe(200);
+    const [holder] = await t.db.select().from(user).where(eq(user.email, contested));
+    expect(holder?.id === member.id ? 404 : 201).toBe(accepted);
     expect(await t.db.select().from(user).where(eq(user.email, contested))).toHaveLength(1);
   });
 });

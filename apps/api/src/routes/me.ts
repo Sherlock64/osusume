@@ -1,9 +1,8 @@
 import { createRoute } from '@hono/zod-openapi';
 import {
-  accountSchema,
   changeEmailSchema,
   deleteAccountSchema,
-  emailSentResponseSchema,
+  requestCompletedResponseSchema,
   tokenBodySchema,
 } from '@osusume/shared';
 import { and, eq, gt, or, sql } from 'drizzle-orm';
@@ -15,13 +14,13 @@ import {
   firstAdminProtected,
   isAddressRefusal,
   removeUser,
-  toAccount,
 } from '../auth/accounts.ts';
 import { emailChangeMail } from '../auth/emails.ts';
+import type { Database } from '../db/client.ts';
 import { emailChangeRequest, inviteRequest, user } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
 import { lockEmails } from '../lib/locks.ts';
-import { sendOrFail } from '../lib/mailer.ts';
+import { type MailMessage, type Mailer, sendOrFail } from '../lib/mailer.ts';
 import {
   conflict,
   createRouter,
@@ -40,12 +39,30 @@ const EMAIL_CHANGE_LINK_LIFETIME_MS = 24 * 60 * 60 * 1000;
 const tokenInvalid = () =>
   new ApiError(404, 'token_invalid', 'This link is not valid or has expired.');
 
+const requestCompleted = { message: 'Request completed' } as const;
+const requestCompletedContent = {
+  'application/json': { schema: requestCompletedResponseSchema },
+};
+
 /**
- * All a non-admin hears when asking for an email change or using its link, for an address that
- * is registered or banned and, on the link, for a dead link too.
+ * Not awaited, and failures are not reported: the time an SMTP send takes, or its failing, would
+ * tell a non-admin the address was not refused. A link that could not be sent is dropped.
  */
-const emailChangeRefused = () =>
-  new ApiError(409, 'email_change_refused', 'This email change cannot be completed.');
+function sendLinkInBackground(
+  db: Database,
+  mailer: Mailer,
+  message: MailMessage,
+  tokenHash: string,
+): void {
+  void mailer.send(message).catch(async (error: unknown) => {
+    console.error('Sending the email change link failed:', error);
+    try {
+      await db.delete(emailChangeRequest).where(eq(emailChangeRequest.tokenHash, tokenHash));
+    } catch (deleteError) {
+      console.error('Dropping the unsent email change link failed:', deleteError);
+    }
+  });
+}
 
 const deleteAccountRoute = createRoute({
   method: 'delete',
@@ -74,15 +91,16 @@ const requestEmailChangeRoute = createRoute({
     body: { required: true, content: { 'application/json': { schema: changeEmailSchema } } },
   },
   responses: {
-    202: {
-      description: 'The link was sent; the email has not changed yet',
-      content: { 'application/json': { schema: emailSentResponseSchema } },
+    200: {
+      description:
+        'The same answer whether a link was sent or the address was refused. The email has not changed yet',
+      content: requestCompletedContent,
     },
     ...invalidRequest,
     ...unauthenticated,
-    ...conflict,
+    409: { description: 'Admins only: why the address was refused', content: conflict[409].content },
     ...rateLimited,
-    ...emailFailed,
+    503: { description: 'Admins only: the email could not be sent', content: emailFailed[503].content },
   },
 });
 
@@ -97,13 +115,14 @@ const verifyEmailChangeRoute = createRoute({
   },
   responses: {
     200: {
-      description: 'The email was changed',
-      content: { 'application/json': { schema: accountSchema } },
+      description:
+        'For a non-admin, the same answer whether the email changed, was refused or the link was dead',
+      content: requestCompletedContent,
     },
     ...invalidRequest,
-    403: unauthenticated[403],
-    ...notFound,
-    ...conflict,
+    403: { description: 'Admins only: the account is disabled', content: unauthenticated[403].content },
+    404: { description: 'Admins only: the link is dead', content: notFound[404].content },
+    409: { description: 'Admins only: why the address was refused', content: conflict[409].content },
   },
 });
 
@@ -124,12 +143,15 @@ export const meRoutes = createRouter()
 
     await assertCurrentPassword({ db, auth }, userId, currentPassword);
 
+    const isAdmin = c.var.currentUser.role === 'admin';
     const token = generateToken();
+    const tokenHash = hashToken(token);
     const values = {
       newEmail,
-      tokenHash: hashToken(token),
+      tokenHash,
       expiresAt: new Date(Date.now() + EMAIL_CHANGE_LINK_LIFETIME_MS),
     };
+    const mail = emailChangeMail(publicBaseUrl, newEmail, token);
     try {
       await db.transaction(async (tx) => {
         await lockEmails(tx, newEmail);
@@ -138,13 +160,15 @@ export const meRoutes = createRouter()
           .insert(emailChangeRequest)
           .values({ userId, ...values })
           .onConflictDoUpdate({ target: emailChangeRequest.userId, set: values });
-        await sendOrFail(mailer, emailChangeMail(publicBaseUrl, newEmail, token));
+        // An admin hears about a failure, which rolls this back.
+        if (isAdmin) await sendOrFail(mailer, mail);
       });
     } catch (error) {
-      if (isAddressRefusal(error) && c.var.currentUser.role !== 'admin') throw emailChangeRefused();
-      throw error;
+      if (!isAddressRefusal(error) || isAdmin) throw error;
+      return c.json(requestCompleted, 200);
     }
-    return c.json({ status: 'email_sent' as const }, 202);
+    if (!isAdmin) sendLinkInBackground(db, mailer, mail, tokenHash);
+    return c.json(requestCompleted, 200);
   })
   .openapi(verifyEmailChangeRoute, async (c) => {
     const { db, auth } = c.var.deps;
@@ -157,7 +181,7 @@ export const meRoutes = createRouter()
         .where(eq(emailChangeRequest.tokenHash, tokenHash));
       if (!found) throw tokenInvalid();
 
-      const updated = await db.transaction(async (tx) => {
+      await db.transaction(async (tx) => {
         const [current] = await tx
           .select()
           .from(user)
@@ -208,17 +232,19 @@ export const meRoutes = createRouter()
               ),
             ),
           );
-        return row;
       });
-      return c.json(toAccount(updated), 200);
+      return c.json(requestCompleted, 200);
     } catch (error) {
       const refusal = isUniqueViolation(error, 'user_email_unique')
         ? new ApiError(409, 'email_in_use', 'An account already uses this email address.')
         : error;
       const hidden =
         isAddressRefusal(refusal) ||
-        (refusal instanceof ApiError && refusal.code === 'token_invalid');
-      if (hidden && !(await callerIsAdmin(auth, c.req.raw.headers))) throw emailChangeRefused();
+        (refusal instanceof ApiError &&
+          (refusal.code === 'token_invalid' || refusal.code === 'account_disabled'));
+      if (hidden && !(await callerIsAdmin(auth, c.req.raw.headers))) {
+        return c.json(requestCompleted, 200);
+      }
       throw refusal;
     }
   });

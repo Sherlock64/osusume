@@ -670,7 +670,7 @@ describe('the email lock', () => {
     const response = await callWhileLocked(newEmail, blacklist(newEmail), () =>
       t.request('POST', '/api/v1/me/email/verify', { token }),
     );
-    expectError(response, 409, 'email_change_refused');
+    expect(response.status).toBe(200);
     const [row] = await t.db.select().from(user).where(eq(user.id, someone.id));
     expect(row?.email).toBe(someone.email);
   });
