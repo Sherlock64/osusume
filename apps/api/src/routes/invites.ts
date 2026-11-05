@@ -12,6 +12,7 @@ import {
   inviteRequestListQuerySchema,
   inviteRequestSchema,
   paginatedSchema,
+  type UserRole,
 } from '@osusume/shared';
 import { and, eq, or, sql } from 'drizzle-orm';
 import {
@@ -43,9 +44,24 @@ import { requireAdmin, requireSession } from '../middleware/auth.ts';
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
+const inviteRefused = () =>
+  new ApiError(409, 'invite_refused', 'This email address cannot be invited.');
 const inviteNotFound = () => new ApiError(404, 'invite_not_found', 'No such invite request.');
 const inviteInvalid = () =>
   new ApiError(404, 'invite_invalid', 'This invite link is not valid or has expired.');
+
+/**
+ * assertEmailUnused for the person asking. A member gets one refusal for both reasons, so
+ * asking cannot reveal whether an address has an account or is banned. Admins see the reason.
+ */
+async function assertRequestable(tx: Transaction, email: string, role: UserRole): Promise<void> {
+  try {
+    await assertEmailUnused(tx, email);
+  } catch (error) {
+    if (role !== 'admin' && error instanceof ApiError) throw inviteRefused();
+    throw error;
+  }
+}
 
 /** Hold the email's lock. Open: pending, or approved and not yet expired, accepted or revoked. */
 async function assertNoOpenInvite(tx: Transaction, email: string): Promise<void> {
@@ -222,11 +238,11 @@ export const inviteRoutes = createRouter()
   .openapi(createRequestRoute, async (c) => {
     const { db } = c.var.deps;
     const { email } = c.req.valid('json');
-    const requesterId = c.var.currentUser.id;
+    const { id: requesterId, role } = c.var.currentUser;
     try {
       const created = await db.transaction(async (tx) => {
         await lockEmails(tx, email);
-        await assertEmailUnused(tx, email);
+        await assertRequestable(tx, email, role);
         await assertNoOpenInvite(tx, email);
         const [row] = await tx
           .insert(inviteRequest)

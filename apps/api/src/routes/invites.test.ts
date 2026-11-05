@@ -77,23 +77,28 @@ describe('POST /invite-requests', () => {
     for (let i = 0; i < 5; i += 1) await requestInvite();
   });
 
-  it('refuses a blacklisted email, ignoring case', async () => {
-    const email = uniqueEmail('blacklisted');
-    await t.db.insert(emailBlacklist).values({ email });
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email: email.toUpperCase() }, { cookie: member.cookie }),
-      409,
-      'email_blacklisted',
-    );
-  });
+  describe('an address with an account or on the blacklist', () => {
+    const ask = (email: string, cookie: string) =>
+      t.request('POST', '/api/v1/invite-requests', { email }, { cookie });
 
-  it('refuses an email with an existing account, ignoring case', async () => {
-    const existing = await t.seedUser();
-    expectError(
-      await t.request('POST', '/api/v1/invite-requests', { email: existing.email.toUpperCase() }, { cookie: member.cookie }),
-      409,
-      'email_in_use',
-    );
+    async function blacklisted() {
+      const email = uniqueEmail('blacklisted');
+      await t.db.insert(emailBlacklist).values({ email });
+      return email;
+    }
+
+    it('gets a member the same refusal for both, ignoring case', async () => {
+      const banned = await ask((await blacklisted()).toUpperCase(), member.cookie);
+      const registered = await ask((await t.seedUser()).email.toUpperCase(), member.cookie);
+      expectError(banned, 409, 'invite_refused');
+      expect(registered.status).toBe(banned.status);
+      expect(registered.body).toEqual(banned.body);
+    });
+
+    it('gets an admin the specific reason, ignoring case', async () => {
+      expectError(await ask((await blacklisted()).toUpperCase(), admin.cookie), 409, 'email_blacklisted');
+      expectError(await ask((await t.seedUser()).email.toUpperCase(), admin.cookie), 409, 'email_in_use');
+    });
   });
 
   it('refuses a second open invite: pending', async () => {
@@ -562,7 +567,7 @@ describe('the email lock', () => {
     const response = await callWhileLocked(email, blacklist(email), () =>
       t.request('POST', '/api/v1/invite-requests', { email }, { cookie: member.cookie }),
     );
-    expectError(response, 409, 'email_blacklisted');
+    expectError(response, 409, 'invite_refused');
   });
 
   it('makes a request wait for an invite being opened, which no index covers', async () => {
