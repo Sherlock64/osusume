@@ -1,0 +1,36 @@
+{
+  "name": "@osusume/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./app-type": {
+      "types": "./src/app.ts"
+    }
+  },
+  "scripts": {
+    "dev": "node --conditions=@osusume/source --env-file-if-exists=../../.env --watch src/main.ts",
+    "start": "node dist/main.js",
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "db:generate": "pnpm --filter @osusume/shared build && drizzle-kit generate",
+    "db:migrate": "node --conditions=@osusume/source --env-file-if-exists=../../.env src/db/migrate.ts"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.6",
+    "@hono/zod-openapi": "^1.6.3",
+    "@osusume/shared": "workspace:*",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.16",
+    "pg": "^8.23.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.23.1",
+    "drizzle-kit": "^0.31.11",
+    "typescript": "~6.0.0",
+    "vitest": "^5.1.0"
+  }
+}
