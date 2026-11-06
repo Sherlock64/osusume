@@ -1,5 +1,7 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createApp } from './app.ts';
+import { MAX_REQUEST_BODY_BYTES } from './lib/body-size.ts';
 import { type TestApp, createTestApp } from './test-support/test-app.ts';
 
 let harness: TestApp;
@@ -43,6 +45,62 @@ describe('health endpoints', () => {
     const response = await appWith(databaseDown).request('/api/v1/health/ready');
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ status: 'unavailable' });
+  });
+});
+
+describe('request body limit', () => {
+  const oversized = 'x'.repeat(MAX_REQUEST_BODY_BYTES + 1);
+
+  function chunked(body: string): ReadableStream<Uint8Array> {
+    return new Blob([body]).stream();
+  }
+
+  it.each([
+    ['a v1 route', '/api/v1/setup'],
+    ['an auth route', '/api/auth/sign-in/username'],
+    ['the upload route, when the body is not multipart', `/api/v1/series/${randomUUID()}/images`],
+  ])('refuses too much JSON on %s, by Content-Length', async (_name, path) => {
+    const response = await appWith(healthy).request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: oversized,
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: { code: 'request_too_large' } });
+  });
+
+  it.each([
+    ['a v1 route', '/api/v1/setup'],
+    ['an auth route', '/api/auth/sign-in/username'],
+  ])('refuses too much JSON on %s with no Content-Length', async (_name, path) => {
+    const response = await appWith(healthy).request(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: chunked(oversized),
+      duplex: 'half',
+    });
+    expect(response.status).toBe(413);
+  });
+
+  it('refuses a form sent to an auth route, which Better Auth would parse', async () => {
+    const response = await appWith(healthy).request('/api/auth/sign-in/username', {
+      method: 'POST',
+      headers: { 'Content-Type': 'multipart/form-data; boundary=x' },
+      body: oversized,
+    });
+    expect(response.status).toBe(413);
+  });
+
+  it('lets a body under the limit reach the route, with or without Content-Length', async () => {
+    const body = JSON.stringify({ username: 'x'.repeat(MAX_REQUEST_BODY_BYTES / 2) });
+    for (const init of [{ body }, { body: chunked(body), duplex: 'half' }] as RequestInit[]) {
+      const response = await appWith(healthy).request('/api/v1/setup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        ...init,
+      });
+      expect(response.status).toBe(400);
+    }
   });
 });
 

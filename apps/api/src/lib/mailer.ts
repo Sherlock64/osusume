@@ -17,12 +17,18 @@ type SmtpEnv = Pick<
   'SMTP_HOST' | 'SMTP_PORT' | 'SMTP_SECURE' | 'SMTP_USER' | 'SMTP_PASSWORD' | 'SMTP_FROM'
 >;
 
-/** Plain SMTP from env configuration, so any provider works. */
+/**
+ * SMTP from env configuration, so any provider works. With SMTP_SECURE=false, nodemailer upgrades
+ * through STARTTLS only if the server offers it. A server that does not, or anyone in between
+ * removing the offer, would get the password in the clear, so with credentials it is required.
+ */
 export function createSmtpMailer(env: SmtpEnv): Mailer {
+  const hasCredentials = env.SMTP_USER !== undefined && env.SMTP_PASSWORD !== undefined;
   const transport = createTransport({
     host: env.SMTP_HOST,
     port: env.SMTP_PORT,
     secure: env.SMTP_SECURE,
+    requireTLS: hasCredentials && !env.SMTP_SECURE,
     // Links are sent inside a transaction that holds locks, so a hung server must fail fast.
     connectionTimeout: 10_000,
     greetingTimeout: 10_000,

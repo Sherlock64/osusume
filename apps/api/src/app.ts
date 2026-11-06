@@ -2,6 +2,7 @@ import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ErrorResponse } from '@osusume/shared';
 import { HTTPException } from 'hono/http-exception';
 import { exposedAuthEndpoints } from './auth/auth.ts';
+import { limitRequestBody } from './lib/body-size.ts';
 import type { AppDependencies, AppEnv } from './lib/context.ts';
 import { ApiError } from './lib/errors.ts';
 import { privateByDefault } from './lib/http-cache.ts';
@@ -62,7 +63,9 @@ export function createApp(dependencies: AppDependencies) {
     servers: [{ url: '/api/v1' }],
   });
 
-  const app = new OpenAPIHono().route('/api/v1', routes);
+  const root = new OpenAPIHono();
+  root.use(limitRequestBody);
+  const app = root.route('/api/v1', routes);
 
   // Crawlers ask at the site's root, so this works only where the root forwards the path here.
   app.get('/robots.txt', (c) =>
