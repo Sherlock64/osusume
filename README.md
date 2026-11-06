@@ -36,6 +36,83 @@ Routes live in `apps/web/src/routes`, assembled in `apps/web/src/router.tsx`. Pa
 are children of `appRoute`, which guards them and draws the shell; the menu is
 `apps/web/src/app/nav.ts`.
 
+## Run it with Podman Compose
+
+Proxy, web, api, Postgres, Mailpit and a migrate step, with mail going to Mailpit. Needs a compose
+provider, as above.
+
+```sh
+infra/init-compose-env.sh                     # once: generates the secrets into infra/.env
+podman compose -f infra/compose.yaml up -d --build
+```
+
+Then open http://localhost:8090/setup to create the first admin, and find the link in Mailpit at
+http://localhost:8026. Set `OSUSUME_PORT` and `MAILPIT_PORT` in `infra/.env` to use other ports. Both
+are bound to 127.0.0.1, so everyone arriving through the published port shares one rate-limit bucket.
+
+Migrations run on every `up`. `down` keeps the data; `down -v` deletes it.
+
+## Run it on minikube
+
+Needs the ingress addon. The chart in `infra/helm/osusume` holds the settings and notes in its
+`values.yaml`. It sends real email, so first create the Secret it expects, in the namespace you
+install to, with the keys `SMTP_USER` and `SMTP_PASSWORD`. Gmail needs an app password.
+
+```sh
+kubectl create namespace osusume
+kubectl -n osusume create secret generic osusume-smtp \
+  --from-literal=SMTP_USER=you@example.com --from-literal=SMTP_PASSWORD='the app password'
+cp infra/helm/values.local.yaml.example infra/helm/values.local.yaml   # then set smtp.from
+```
+
+Build and load the images, then install or upgrade with the same commands. `minikube image load`
+can't see Podman's images by name, so they go through a file. Each build needs a new tag, or the
+Deployments see no change.
+
+```sh
+TAG=$(git rev-parse --short HEAD)
+for target in api web; do
+  podman build --target $target -t localhost/osusume-$target:$TAG -f Containerfile .
+  podman save -o /tmp/osusume-$target.tar localhost/osusume-$target:$TAG
+  minikube image load /tmp/osusume-$target.tar
+  rm /tmp/osusume-$target.tar
+done
+helm upgrade --install osusume infra/helm/osusume -n osusume -f infra/helm/values.local.yaml \
+  --set image.api.tag=$TAG --set image.web.tag=$TAG --wait --timeout 5m
+kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8080:80
+```
+
+Then open http://localhost:8080/setup to create the first admin. The site answers only at the
+address in `publicBaseUrl` and the host in `ingress.host`.
+
+The api runs as one replica, as its rate limits are counted per process. `AUTH_SECRET` and the
+Postgres password are generated on first install and reused on upgrade. They and both volumes are
+kept by `helm uninstall`; to start over, also delete the namespace.
+
+If about a third of requests hang, check the controller's log for `pthread_create() failed`. On a
+machine with many cores, ingress-nginx starts one worker per core, each with 33 threads, which can
+pass the pod's process limit (`pids.max` in the controller pod). The workers that fail to start
+leave listening sockets that nobody answers. Fewer workers avoid it:
+
+```sh
+kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
+  -p '{"data":{"worker-processes":"2"}}'
+```
+
+## Smoke tests
+
+A few Playwright tests in `e2e/` that run against either deployment. They need a browser once:
+`pnpm --filter @osusume/e2e exec playwright install chromium-headless-shell`.
+
+```sh
+SMOKE_BASE_URL=http://localhost:8090 SMOKE_MAILPIT_URL=http://localhost:8026 pnpm smoke
+```
+
+`SMOKE_BASE_URL` defaults to http://localhost:8080. With `SMOKE_MAILPIT_URL` on a new install, they
+do first-run setup and create an admin, so don't use it on a site you want to set up yourself.
+Otherwise, set `SMOKE_ADMIN_USERNAME` and `SMOKE_ADMIN_PASSWORD` for the tests that need a login;
+they add and then delete a series. Without either, those tests are skipped.
+
 ## Checks
 
 ```sh
@@ -70,6 +147,9 @@ That limiter counts per client IP on `/api/auth`. Other routes that check a pass
 counts separately, so running N instances allows N times the attempts. `POST /invite-requests` uses
 the same limiter with its own bucket, 10 requests per hour per logged-in user, admins included. It
 runs before the address is read, so a 429 says nothing about any address.
+
+Request bodies are limited to 1 MiB, by `limitRequestBody` in `apps/api/src/lib/body-size.ts`, before
+anything reads them. Only image uploads are larger, with their own limit.
 
 Answers about an address give nothing away. A non-admin always gets the same success from
 `POST /invite-requests`, including for an address with an account, on the blacklist or with an open
