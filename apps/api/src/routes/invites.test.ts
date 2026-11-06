@@ -1,5 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Transaction } from '../db/client.ts';
 import { emailBlacklist, inviteRequest, user } from '../db/schema.ts';
 import { lockEmails } from '../lib/locks.ts';
@@ -439,6 +439,20 @@ describe('POST /admin/invite-requests/{id}/revoke', () => {
 });
 
 describe('POST /invites/{token}/accept', () => {
+  it('hashes the password even for a dead link', async () => {
+    const hash = vi.spyOn((await t.auth.$context).password, 'hash');
+    try {
+      const response = await t.request('POST', '/api/v1/invites/not-a-real-token/accept', {
+        username: uniqueUsername('Dead'),
+        password: PASSWORD,
+      });
+      expectError(response, 404, 'invite_invalid');
+      expect(hash).toHaveBeenCalledTimes(1);
+    } finally {
+      hash.mockRestore();
+    }
+  });
+
   it('creates a member with the invited, verified email, who can log in', async () => {
     const { id, email, token } = await approvedInvite();
     const username = uniqueUsername('Invited');

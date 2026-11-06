@@ -153,3 +153,15 @@ describe('routing', () => {
     expect(body.error.message).not.toContain('sho');
   });
 });
+
+describe('the default cache policy', () => {
+  it('stops a shared cache keeping what does not state its own', async () => {
+    const response = await appWith(healthy).request('/api/v1/health');
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
+  });
+
+  it('leaves a route its own policy', async () => {
+    const response = await appWith(healthy).request('/api/v1/invites/not-a-real-token');
+    expect(response.headers.get('cache-control')).toBe('no-store');
+  });
+});

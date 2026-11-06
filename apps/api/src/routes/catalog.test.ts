@@ -115,7 +115,7 @@ describe('authorization', () => {
   it.each(reads)('%s %s needs a session', async (method, path) => {
     const response = await t.request(method, `/api/v1${path}`);
     expectError(response, 401, 'unauthenticated');
-    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 
   it.each(writes)('%s %s needs a session', async (method, path, body) => {
@@ -508,7 +508,8 @@ describe('search', () => {
 
   it('treats LIKE wildcards literally', async () => {
     const percent = await createSeries({ title: 'Wild 100% Card' });
-    expect(await titlesFor('q=100%25')).toEqual([percent.title]);
+    // Other titles with numbers can match loosely, but only this one holds the literal text.
+    expect((await titlesFor('q=100%25'))[0]).toBe(percent.title);
     expect(await titlesFor('q=W_ld')).toEqual([]);
     expect(await titlesFor('q=%25%25%25%25')).toEqual([]);
   });
@@ -522,6 +523,24 @@ describe('search', () => {
     const loose = await createSeries({ title: 'Marmoset Cafe Stories of the Long Afternoon' });
     const close = await createSeries({ title: 'Marmoset Cafe' });
     expect(await titlesFor('q=marmoset+cafe')).toEqual([close.title, loose.title]);
+  });
+
+  it('finds a misspelled title, best match first', async () => {
+    const bleach = await createSeries({ title: 'Bleach' });
+    const naruto = await createSeries({ title: 'Naruto' });
+    const onePiece = await createSeries({ title: 'One Piece' });
+    // Share letters with the typos, but less of them.
+    await createSeries({ title: 'Black Clover' });
+    await createSeries({ title: 'Nana' });
+    await createSeries({ title: 'One Outs' });
+
+    for (const [typo, wanted] of [
+      ['Bleech', bleach],
+      ['Narto', naruto],
+      ['One Peice', onePiece],
+    ] as const) {
+      expect((await titlesFor(`q=${encodeURIComponent(typo)}`))[0]).toBe(wanted.title);
+    }
   });
 
   it('refuses a query over the limit', async () => {
@@ -544,6 +563,44 @@ describe('search', () => {
     ]) {
       expect(plan).toContain(index);
     }
+  });
+});
+
+describe('input Postgres cannot take', () => {
+  const cursorOf = (value: unknown) =>
+    Buffer.from(JSON.stringify(value), 'utf8').toString('base64url');
+
+  it('refuses a NUL byte in a query or a JSON body', async () => {
+    expectError(await asMember('GET', '/series?q=a%00b'), 400, 'validation_error');
+    expectError(
+      await asMember('POST', '/catalog-requests', { kind: 'new_series', title: 'a\u0000b' }),
+      400,
+      'validation_error',
+    );
+    expectError(await asAdmin('POST', '/tags', { name: 'a\u0000b' }), 400, 'validation_error');
+  });
+
+  it('still accepts the literal text of a NUL escape', async () => {
+    const name = uniqueTitle('\\u0000 %00');
+    const response = await asAdmin('POST', '/tags', { name });
+    expect(response.status).toBe(201);
+    expect((response.body as TagBody).name).toBe(name);
+  });
+
+  it.each([
+    ['an out of range number', [[0, 99999999999, 'a'], NO_ID]],
+    ['a NUL byte', [[0, 1, 'a\u0000b'], NO_ID]],
+  ])('refuses a series cursor with %s', async (_label, cursor) => {
+    const response = await asMember('GET', `/series?cursor=${cursorOf(cursor)}`);
+    expectError(response, 400, 'invalid_cursor');
+  });
+
+  it('refuses a date cursor Postgres cannot read', async () => {
+    const response = await asAdmin(
+      'GET',
+      `/admin/invite-requests?cursor=${cursorOf(['-200000-01-01T00:00:00.000Z', NO_ID])}`,
+    );
+    expectError(response, 400, 'invalid_cursor');
   });
 });
 
@@ -739,7 +796,7 @@ describe('cache headers', () => {
   it('marks a 404 as nothing to cache', async () => {
     const response = await asMember('GET', `/series/${NO_ID}`);
     expect(response.status).toBe(404);
-    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 });
 

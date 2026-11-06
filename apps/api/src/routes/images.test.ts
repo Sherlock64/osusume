@@ -62,7 +62,7 @@ describe('authorization', () => {
     const { id } = await uploaded();
     const response = await t.app.request(`http://osusume.test/api/v1/images/${id}/small`);
     expect(response.status).toBe(401);
-    expect(response.headers.get('cache-control')).toBeNull();
+    expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 });
 

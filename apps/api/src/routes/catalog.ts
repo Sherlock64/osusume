@@ -280,8 +280,8 @@ const deleteTagRoute = createRoute({
   },
 });
 
-/** relevance (0 when not searching), date key, lowercased title. */
-const seriesSortSchema = z.tuple([z.number().int(), z.number().int(), z.string()]);
+/** relevance (0 when not searching), date key, lowercased title. The numbers are Postgres integers. */
+const seriesSortSchema = z.tuple([z.int32(), z.int32(), z.string()]);
 
 const tagNameKey = sql<string>`lower(${tag.name})`;
 

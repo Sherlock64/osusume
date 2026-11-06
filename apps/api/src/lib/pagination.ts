@@ -1,6 +1,7 @@
 import { type AnyColumn, type SQL, asc, desc, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { ApiError } from './errors.ts';
+import { jsonHasNul } from './nul-bytes.ts';
 
 export type SortDirection = 'asc' | 'desc';
 
@@ -23,15 +24,22 @@ export function encodeCursor(cursor: Cursor<CursorSort>): string {
  * Throws a 400 ApiError for anything this api did not issue.
  */
 export function decodeCursor<Sort>(raw: string, sortSchema: z.ZodType<Sort>): Cursor<Sort> {
+  const json = Buffer.from(raw, 'base64url').toString('utf8');
+  if (jsonHasNul(json)) throw invalidCursor();
   let decoded: unknown;
   try {
-    decoded = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8'));
+    decoded = JSON.parse(json);
   } catch {
     throw invalidCursor();
   }
   const parsed = z.tuple([sortSchema, z.uuid()]).safeParse(decoded);
   if (!parsed.success) throw invalidCursor();
-  return { sort: parsed.data[0], id: parsed.data[1] };
+  const sort = parsed.data[0];
+  if (sort instanceof Date && (sort.getUTCFullYear() < 1 || sort.getUTCFullYear() > 9999)) {
+    // A valid Date, but not one Postgres can read back.
+    throw invalidCursor();
+  }
+  return { sort, id: parsed.data[1] };
 }
 
 function invalidCursor(): ApiError {

@@ -2,6 +2,15 @@ import { createMiddleware } from 'hono/factory';
 import { etag } from 'hono/etag';
 import type { AppEnv } from './context.ts';
 
+/**
+ * For all of /api/v1. Whatever does not state its own policy may depend on who is asking, so
+ * nothing stores it. Routes with a policy of their own use the middleware below.
+ */
+export const privateByDefault = createMiddleware(async (c, next) => {
+  await next();
+  if (!c.res.headers.has('Cache-Control')) c.res.headers.set('Cache-Control', 'private, no-store');
+});
+
 /** Sets the headers on what a route answers with, and leaves its refusals uncached. */
 function cacheHeaders(cacheControl: string) {
   return createMiddleware(async (c, next) => {

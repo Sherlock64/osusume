@@ -4,6 +4,8 @@ import { HTTPException } from 'hono/http-exception';
 import { exposedAuthEndpoints } from './auth/auth.ts';
 import type { AppDependencies, AppEnv } from './lib/context.ts';
 import { ApiError } from './lib/errors.ts';
+import { privateByDefault } from './lib/http-cache.ts';
+import { rejectNulBytes } from './lib/nul-bytes.ts';
 import { adminUserRoutes } from './routes/admin-users.ts';
 import { catalogRequestRoutes } from './routes/catalog-requests.ts';
 import { catalogRoutes } from './routes/catalog.ts';
@@ -24,6 +26,8 @@ const AUTH_BASE_PATH = '/api/auth';
 
 export function createApp(dependencies: AppDependencies) {
   const v1 = new OpenAPIHono<AppEnv>();
+  v1.use(privateByDefault);
+  v1.use(rejectNulBytes);
   v1.use(async (c, next) => {
     c.set('deps', dependencies);
     await next();
