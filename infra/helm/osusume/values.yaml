@@ -1,0 +1,75 @@
+# Address users reach the site at. Emailed links are built from it, and Better Auth refuses POSTs
+# from any other origin. An http:// address gets non-Secure session cookies.
+publicBaseUrl: http://localhost:8080
+
+# Built with the Containerfile and loaded with `minikube image load`. Use a new tag for each build:
+# with the same tag, the Deployments see no change and keep the old pods.
+image:
+  pullPolicy: IfNotPresent
+  api:
+    repository: localhost/osusume-api
+    tag: dev
+  web:
+    repository: localhost/osusume-web
+    tag: dev
+
+ingress:
+  className: nginx
+  # An empty host answers for any name.
+  host: localhost
+  # The api's upload limit is 10 MB plus multipart framing, and it answers with a proper error, so
+  # this only has to sit just above it. Everything else is limited by the api itself, to 1 MiB.
+  proxyBodySize: 11m
+
+# The api always runs as a single replica. Its rate limits are counted in memory, per process, so N
+# replicas would allow N times the login attempts. The image volume is also ReadWriteOnce.
+# Upgrades replace the pod rather than rolling it, so expect a short outage.
+api:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+web:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 16Mi
+    limits:
+      memory: 64Mi
+
+# Uploaded images. The PVC is kept on `helm uninstall`.
+imageStorage:
+  size: 5Gi
+  # Empty uses the cluster's default storage class.
+  storageClassName: ''
+
+postgres:
+  # false uses the database at externalUrl instead of running one in the cluster.
+  enabled: true
+  externalUrl: ''
+  image: docker.io/library/postgres:18-alpine
+  # The StatefulSet's PVC is kept on `helm uninstall`.
+  size: 5Gi
+  storageClassName: ''
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 1Gi
+
+# Links go out by email, so the first admin can't be created without this working. With credentials
+# the api insists on TLS, whatever `secure` says: it refuses to log in to a server without STARTTLS.
+smtp:
+  host: smtp.gmail.com
+  port: 587
+  # false is STARTTLS on port 587. true is TLS from the start, usually on port 465.
+  secure: false
+  # Required, for example "Osusume <someone@example.com>". Set it in a file outside git, such as
+  # infra/helm/values.local.yaml.
+  from: ''
+  # An existing Secret with the keys SMTP_USER and SMTP_PASSWORD. Empty sends without logging in.
+  existingSecret: osusume-smtp

@@ -1,0 +1,3 @@
+# Copy to infra/helm/values.local.yaml, which git ignores, and pass it with -f.
+smtp:
+  from: Osusume <you@example.com>

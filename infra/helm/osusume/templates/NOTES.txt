@@ -1,0 +1,6 @@
+Osusume is installing at {{ .Values.publicBaseUrl }}.
+
+With minikube, reach it with:
+  kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8080:80
+
+On a new install, open /setup there and create the first admin. The link is sent by email.
