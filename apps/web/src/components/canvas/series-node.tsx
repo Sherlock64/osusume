@@ -1,3 +1,4 @@
+import type { Cover } from '@osusume/shared';
 import { Link } from '@tanstack/react-router';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { ImageOff } from 'lucide-react';
@@ -8,7 +9,7 @@ import { cn } from '@/lib/utils';
 export type SeriesNodeData = {
   seriesId: string;
   title: string;
-  imageUrl: string | null;
+  cover: Cover | null;
   /** Whether the node can be dragged and connected. */
   interactive: boolean;
   /** Newly placed by the layout this session: plays a brief pop-in. */
@@ -59,10 +60,10 @@ export function SeriesNode({ data, dragging }: NodeProps<SeriesFlowNode>) {
           />
         ))}
       <div className="bg-muted flex h-32 items-center justify-center overflow-hidden rounded-md">
-        {data.imageUrl === null ?
+        {data.cover === null ?
           <ImageOff className="text-muted-foreground size-6" aria-hidden />
         : <img
-            src={data.imageUrl}
+            src={`/api/v1/images/${data.cover.id}/medium`}
             alt=""
             loading="lazy"
             draggable={false}

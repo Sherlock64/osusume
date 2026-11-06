@@ -1,3 +1,4 @@
+import type { CanvasLink, CanvasLinkKind, CanvasNode } from '@osusume/shared';
 import {
   applyNodeChanges,
   Background,
@@ -17,22 +18,8 @@ import { SeriesNode, type SeriesFlowNode } from '@/components/canvas/series-node
 import { facingSides, placeNodes } from '@/lib/canvas-layout';
 import './canvas.css';
 
-type LinkKind = 'recommend' | 'avoid';
-
-interface CanvasLink {
-  seriesAId: string;
-  seriesBId: string;
-  kind: LinkKind;
-}
-
 interface RecommendationCanvasProps {
-  nodes: {
-    seriesId: string;
-    title: string;
-    imageUrl: string | null;
-    x: number | null;
-    y: number | null;
-  }[];
+  nodes: CanvasNode[];
   links: CanvasLink[];
   editable: boolean;
   onMoveNodes: (positions: { seriesId: string; x: number; y: number }[]) => void;
@@ -66,7 +53,7 @@ function useCoarsePointer() {
   );
 }
 
-function LegendLine({ kind }: { kind: LinkKind }) {
+function LegendLine({ kind }: { kind: CanvasLinkKind }) {
   return (
     <svg width="28" height="8" aria-hidden>
       <line
@@ -131,7 +118,7 @@ export function RecommendationCanvas({
         data: {
           seriesId: position.seriesId,
           title: node?.title ?? '',
-          imageUrl: node?.imageUrl ?? null,
+          cover: node?.cover ?? null,
           interactive,
           popIn: editable && position.placed,
         },
@@ -144,7 +131,9 @@ export function RecommendationCanvas({
   const [nodes, setNodes] = useState(flowNodes);
   if (syncedFrom !== flowNodes) {
     setSyncedFrom(flowNodes);
-    setNodes(flowNodes);
+    // A refetch must not snap back a node that is being dragged.
+    const held = new Map(nodes.filter((node) => node.dragging === true).map((node) => [node.id, node]));
+    setNodes(flowNodes.map((node) => held.get(node.id) ?? node));
   }
 
   // Persist the positions the layout chose, once per series.
@@ -186,7 +175,7 @@ export function RecommendationCanvas({
     setMenu({ type: 'connect', ...pointOf(event), seriesAId: from, seriesBId: to });
   };
 
-  const chooseKind = (kind: LinkKind) => {
+  const chooseKind = (kind: CanvasLinkKind) => {
     if (menu?.type === 'connect') {
       onSetLink({ seriesAId: menu.seriesAId, seriesBId: menu.seriesBId, kind });
     } else if (menu?.type === 'edge') {

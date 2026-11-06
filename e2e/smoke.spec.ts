@@ -160,3 +160,30 @@ test('a client-set X-Forwarded-For does not get around the login rate limit', as
   expect(statuses).toContain(429);
   expect(statuses.at(-1)).toBe(429);
 });
+
+test('the constellations page shows a series that was added to the list', async ({ page }) => {
+  test.skip(!adminReady, 'needs an admin: set SMOKE_ADMIN_USERNAME and SMOKE_ADMIN_PASSWORD');
+
+  await logIn(page);
+  const title = `Smoke test ${randomBytes(4).toString('hex')}`;
+  const created = await page.request.post('/api/v1/series', { data: { title } });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  try {
+    const season = await page.request.post('/api/v1/seasons', {
+      data: { seriesId: id, ordinal: 1, title },
+    });
+    expect(season.status(), await season.text()).toBe(201);
+    const { id: seasonId } = (await season.json()) as { id: string };
+    const listed = await page.request.put(`/api/v1/me/list/${seasonId}`, {
+      data: { status: 'watching' },
+    });
+    expect(listed.status(), await listed.text()).toBe(200);
+
+    await page.goto('/constellations');
+    await expect(page.getByText(title)).toBeVisible();
+  } finally {
+    const removed = await page.request.delete(`/api/v1/series/${id}`);
+    expect(removed.ok()).toBe(true);
+  }
+});

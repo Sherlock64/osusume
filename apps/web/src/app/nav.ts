@@ -1,4 +1,5 @@
 import type { UserRole } from '@osusume/shared';
+import { CANVAS_LABEL } from '@/lib/canvas-label';
 import type { LinkProps } from '@tanstack/react-router';
 
 export interface NavItem {
@@ -13,6 +14,7 @@ export interface NavItem {
  */
 export const navItems: NavItem[] = [
   { to: '/', label: 'My list' },
+  { to: '/constellations', label: CANVAS_LABEL },
   { to: '/catalog', label: 'Catalog' },
   { to: '/requests', label: 'Requests' },
   { to: '/friends', label: 'Friends' },
