@@ -86,6 +86,18 @@ function Legend() {
   );
 }
 
+function sameNode(a: SeriesFlowNode, b: SeriesFlowNode) {
+  return (
+    a.position.x === b.position.x &&
+    a.position.y === b.position.y &&
+    a.draggable === b.draggable &&
+    a.data.title === b.data.title &&
+    a.data.cover?.id === b.data.cover?.id &&
+    a.data.interactive === b.data.interactive &&
+    a.data.popIn === b.data.popIn
+  );
+}
+
 function pointOf(event: MouseEvent | TouchEvent) {
   const touch = 'changedTouches' in event ? event.changedTouches[0] : undefined;
   const source = touch ?? (event as MouseEvent);
@@ -106,6 +118,11 @@ export function RecommendationCanvas({
   const [menu, setMenu] = useState<OpenMenu | null>(null);
 
   const placed = useMemo(() => placeNodes(seriesNodes), [seriesNodes]);
+  // Newly placed nodes pop in once; the optimistic save clears `placed` before they first paint.
+  const [popped, setPopped] = useState<ReadonlySet<string>>(new Set());
+  const fresh = editable ? placed.filter((node) => node.placed && !popped.has(node.seriesId)) : [];
+  if (fresh.length > 0) setPopped(new Set([...popped, ...fresh.map((node) => node.seriesId)]));
+
   const flowNodes = useMemo(() => {
     const byId = new Map(seriesNodes.map((node) => [node.seriesId, node]));
     return placed.map((position): SeriesFlowNode => {
@@ -120,11 +137,11 @@ export function RecommendationCanvas({
           title: node?.title ?? '',
           cover: node?.cover ?? null,
           interactive,
-          popIn: editable && position.placed,
+          popIn: popped.has(position.seriesId),
         },
       };
     });
-  }, [placed, seriesNodes, interactive, editable]);
+  }, [placed, seriesNodes, interactive, popped]);
 
   // Local node state carries drags between prop updates; new props replace it.
   const [syncedFrom, setSyncedFrom] = useState(flowNodes);
@@ -132,18 +149,28 @@ export function RecommendationCanvas({
   if (syncedFrom !== flowNodes) {
     setSyncedFrom(flowNodes);
     // A refetch must not snap back a node that is being dragged.
-    const held = new Map(nodes.filter((node) => node.dragging === true).map((node) => [node.id, node]));
-    setNodes(flowNodes.map((node) => held.get(node.id) ?? node));
+    const previous = new Map(nodes.map((node) => [node.id, node]));
+    setNodes(
+      flowNodes.map((node) => {
+        const before = previous.get(node.id);
+        if (before === undefined) return node;
+        if (before.dragging === true) return before;
+        // Unchanged nodes keep their object, and changed ones their measured size, so xyflow
+        // doesn't measure everything again and flash.
+        if (sameNode(before, node)) return before;
+        return { ...node, ...(before.measured === undefined ? {} : { measured: before.measured }) };
+      }),
+    );
   }
 
   // Persist the positions the layout chose, once per series.
   const reported = useRef(new Set<string>());
   useEffect(() => {
     if (!editable) return;
-    const fresh = placed.filter((node) => node.placed && !reported.current.has(node.seriesId));
-    if (fresh.length === 0) return;
-    for (const node of fresh) reported.current.add(node.seriesId);
-    onMoveNodes(fresh.map(({ seriesId, x, y }) => ({ seriesId, x, y })));
+    const unsaved = placed.filter((node) => node.placed && !reported.current.has(node.seriesId));
+    if (unsaved.length === 0) return;
+    for (const node of unsaved) reported.current.add(node.seriesId);
+    onMoveNodes(unsaved.map(({ seriesId, x, y }) => ({ seriesId, x, y })));
   }, [placed, editable, onMoveNodes]);
 
   const edges = useMemo(() => {

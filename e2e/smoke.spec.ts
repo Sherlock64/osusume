@@ -169,12 +169,13 @@ test('the constellations page shows a series that was added to the list', async 
   const created = await page.request.post('/api/v1/series', { data: { title } });
   expect(created.status()).toBe(201);
   const { id } = (await created.json()) as { id: string };
+  let seasonId: string | undefined;
   try {
     const season = await page.request.post('/api/v1/seasons', {
       data: { seriesId: id, ordinal: 1, title },
     });
     expect(season.status(), await season.text()).toBe(201);
-    const { id: seasonId } = (await season.json()) as { id: string };
+    seasonId = ((await season.json()) as { id: string }).id;
     const listed = await page.request.put(`/api/v1/me/list/${seasonId}`, {
       data: { status: 'watching' },
     });
@@ -183,6 +184,11 @@ test('the constellations page shows a series that was added to the list', async 
     await page.goto('/constellations');
     await expect(page.getByText(title)).toBeVisible();
   } finally {
+    // The list entry restricts deleting its season, and a series with seasons can't be deleted.
+    if (seasonId !== undefined) {
+      await page.request.delete(`/api/v1/me/list/${seasonId}`);
+      await page.request.delete(`/api/v1/seasons/${seasonId}`);
+    }
     const removed = await page.request.delete(`/api/v1/series/${id}`);
     expect(removed.ok()).toBe(true);
   }

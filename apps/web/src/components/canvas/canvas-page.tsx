@@ -15,7 +15,7 @@ import {
 
 /**
  * Runs a write against the cached canvas straight away, and puts the cache back if it fails. The
- * rollback is the snapshot taken just before, so it is exact when writes do not overlap.
+ * rollback is the snapshot taken just before, and a refetch settles whatever overlapped it.
  */
 function useCanvasWrite<Variables>(
   username: string,
@@ -33,6 +33,8 @@ function useCanvasWrite<Variables>(
     },
     onError: (_error, _variables, context) => {
       queryClient.setQueryData(key, context?.previous);
+      // Overlapping writes can leave the snapshot stale, so take the server's word.
+      void queryClient.invalidateQueries({ queryKey: key });
     },
   });
 }

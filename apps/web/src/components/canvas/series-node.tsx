@@ -49,16 +49,19 @@ export function SeriesNode({ data, dragging }: NodeProps<SeriesFlowNode>) {
         if (event.animationName === 'canvas-bounce') setBouncing(false);
       }}
     >
-      {data.interactive &&
-        HANDLES.map((handle) => (
-          <Handle
-            key={handle.id}
-            id={handle.id}
-            type="source"
-            position={handle.position}
-            className="bg-background! border-muted-foreground! size-3!"
-          />
-        ))}
+      {/* Always rendered, since lines attach to them; hidden when the node can't be connected. */}
+      {HANDLES.map((handle) => (
+        <Handle
+          key={handle.id}
+          id={handle.id}
+          type="source"
+          position={handle.position}
+          className={cn(
+            'bg-background! border-muted-foreground! size-3!',
+            !data.interactive && 'pointer-events-none opacity-0',
+          )}
+        />
+      ))}
       <div className="bg-muted flex h-32 items-center justify-center overflow-hidden rounded-md">
         {data.cover === null ?
           <ImageOff className="text-muted-foreground size-6" aria-hidden />
