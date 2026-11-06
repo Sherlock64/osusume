@@ -76,7 +76,13 @@ function PublicLink({ slug }: { slug: string }) {
           type="button"
           variant="outline"
           onClick={() => {
-            navigator.clipboard.writeText(link).then(
+            // Browsers offer the clipboard only on HTTPS and localhost.
+            const clipboard = navigator.clipboard as Clipboard | undefined;
+            if (clipboard === undefined) {
+              setCopied('failed');
+              return;
+            }
+            clipboard.writeText(link).then(
               () => {
                 setCopied('yes');
               },

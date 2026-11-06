@@ -50,7 +50,7 @@ function PublicListPage() {
             // Public lists carry no ids. Titles can repeat, so the position goes in too.
             <li key={`${String(index)}-${series.title}`} className="py-3">
               <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-                <h2 className="font-medium">{series.title}</h2>
+                <h2 className="min-w-0 font-medium wrap-anywhere">{series.title}</h2>
                 <p className="text-muted-foreground text-sm">{series.seriesStatus.label}</p>
               </div>
               <ul className="mt-1">
@@ -59,7 +59,7 @@ function PublicListPage() {
                     key={`${String(seasonIndex)}-${season.title}`}
                     className="flex flex-wrap justify-between gap-x-4 text-sm"
                   >
-                    <span>{season.title}</span>
+                    <span className="min-w-0 wrap-anywhere">{season.title}</span>
                     <span className="text-muted-foreground">{listStatusLabels[season.status]}</span>
                   </li>
                 ))}
