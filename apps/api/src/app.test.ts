@@ -141,6 +141,8 @@ describe('OpenAPI document', () => {
       '/invites/{token}/accept',
       '/lists/{slug}',
       '/me',
+      '/me/canvas/links',
+      '/me/canvas/positions',
       '/me/email',
       '/me/email/verify',
       '/me/list',
@@ -159,6 +161,7 @@ describe('OpenAPI document', () => {
       '/tags',
       '/tags/{id}',
       '/username-change-requests',
+      '/users/{username}/canvas',
       '/users/{username}/list',
     ]);
   });

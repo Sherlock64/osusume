@@ -141,6 +141,39 @@ test('an oversized JSON body is refused, without logging in', async ({ request }
   expect(response.status()).toBe(413);
 });
 
+test('the constellations page shows a series that was added to the list', async ({ page }) => {
+  test.skip(!adminReady, 'needs an admin: set SMOKE_ADMIN_USERNAME and SMOKE_ADMIN_PASSWORD');
+
+  await logIn(page);
+  const title = `Smoke test ${randomBytes(4).toString('hex')}`;
+  const created = await page.request.post('/api/v1/series', { data: { title } });
+  expect(created.status()).toBe(201);
+  const { id } = (await created.json()) as { id: string };
+  let seasonId: string | undefined;
+  try {
+    const season = await page.request.post('/api/v1/seasons', {
+      data: { seriesId: id, ordinal: 1, title },
+    });
+    expect(season.status(), await season.text()).toBe(201);
+    seasonId = ((await season.json()) as { id: string }).id;
+    const listed = await page.request.put(`/api/v1/me/list/${seasonId}`, {
+      data: { status: 'watching' },
+    });
+    expect(listed.status(), await listed.text()).toBe(200);
+
+    await page.goto('/constellations');
+    await expect(page.getByText(title)).toBeVisible();
+  } finally {
+    // The list entry restricts deleting its season, and a series with seasons can't be deleted.
+    if (seasonId !== undefined) {
+      await page.request.delete(`/api/v1/me/list/${seasonId}`);
+      await page.request.delete(`/api/v1/seasons/${seasonId}`);
+    }
+    const removed = await page.request.delete(`/api/v1/series/${id}`);
+    expect(removed.ok()).toBe(true);
+  }
+});
+
 // Last, because it uses up this address's login attempts for the next 10 seconds.
 test('a client-set X-Forwarded-For does not get around the login rate limit', async ({
   request,

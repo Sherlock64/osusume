@@ -14,6 +14,7 @@ import { adminUsernameChangesRoute } from '@/routes/app/admin-username-changes';
 import { adminUsersRoute } from '@/routes/app/admin-users';
 import { catalogRoute } from '@/routes/app/catalog';
 import { compareRoute } from '@/routes/app/compare';
+import { memberCanvasRoute, ownCanvasRoute } from '@/routes/app/constellations';
 import { friendsRoute } from '@/routes/app/friends';
 import { homeRoute } from '@/routes/app/home';
 import { invitesRoute } from '@/routes/app/invites';
@@ -64,6 +65,8 @@ export const router = createRouter({
       requestsRoute,
       newRequestRoute,
       memberListRoute,
+      ownCanvasRoute,
+      memberCanvasRoute,
       friendsRoute,
       compareRoute,
       invitesRoute,

@@ -1,0 +1,54 @@
+/* Maps xyflow's variables onto the site's theme tokens. */
+.canvas-flow {
+  --canvas-recommend: oklch(0.62 0.17 150);
+  --canvas-avoid: var(--destructive);
+  --xy-background-color-default: var(--background);
+  --xy-background-pattern-dots-color-default: var(--border);
+  --xy-controls-button-background-color-default: var(--card);
+  --xy-controls-button-background-color-hover-default: var(--muted);
+  --xy-controls-button-color-default: var(--card-foreground);
+  --xy-controls-button-border-color-default: var(--border);
+  --xy-handle-background-color-default: var(--background);
+  --xy-handle-border-color-default: var(--muted-foreground);
+}
+
+.canvas-flow .canvas-edge-recommend .react-flow__edge-path {
+  stroke: var(--canvas-recommend);
+  stroke-width: 2.5;
+}
+
+.canvas-flow .canvas-edge-avoid .react-flow__edge-path {
+  stroke: var(--canvas-avoid);
+  stroke-width: 2.5;
+  stroke-dasharray: 7 5;
+}
+
+/* Played on a node's inner element, so it never fights the transform xyflow puts on the node. */
+@keyframes canvas-bounce {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.07); }
+  55% { transform: scale(0.97); }
+  80% { transform: scale(1.015); }
+  100% { transform: scale(1); }
+}
+
+@keyframes canvas-pop {
+  0% { opacity: 0; transform: scale(0.6); }
+  65% { opacity: 1; transform: scale(1.06); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+.canvas-bounce {
+  animation: canvas-bounce 380ms ease-out;
+}
+
+.canvas-pop {
+  animation: canvas-pop 320ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-bounce,
+  .canvas-pop {
+    animation: none;
+  }
+}

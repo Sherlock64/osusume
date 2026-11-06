@@ -15,6 +15,7 @@ import { friendRoutes } from './routes/friends.ts';
 import { healthRoutes } from './routes/health.ts';
 import { imageRoutes } from './routes/images.ts';
 import { inviteRoutes } from './routes/invites.ts';
+import { canvasRoutes } from './routes/canvas.ts';
 import { listRoutes } from './routes/lists.ts';
 import { meRoutes } from './routes/me.ts';
 import { seriesImageRoutes } from './routes/series-images.ts';
@@ -46,6 +47,7 @@ export function createApp(dependencies: AppDependencies) {
     .route('/', imageRoutes)
     .route('/', seriesImageRoutes)
     .route('/', listRoutes)
+    .route('/', canvasRoutes)
     .route('/', friendRoutes)
     .route('/', compareRoutes);
 

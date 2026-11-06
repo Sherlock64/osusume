@@ -1,4 +1,5 @@
 import {
+  canvasLinkKinds,
   catalogRequestKinds,
   catalogRequestStatuses,
   friendshipStatuses,
@@ -13,6 +14,7 @@ import { type AnyColumn, type SQL, sql } from 'drizzle-orm';
 import {
   boolean,
   check,
+  doublePrecision,
   index,
   integer,
   jsonb,
@@ -60,6 +62,7 @@ export const usernameChangeRequestStatus = pgEnum(
   usernameChangeRequestStatuses,
 );
 export const friendshipStatus = pgEnum('friendship_status', friendshipStatuses);
+export const canvasLinkKind = pgEnum('canvas_link_kind', canvasLinkKinds);
 export const seasonOfYear = pgEnum('season_of_year', seasonsOfYear);
 
 // Millisecond precision so a value survives a round trip through a JS Date,
@@ -492,5 +495,47 @@ export const listSettings = pgTable(
       'list_settings_slug_only_while_public',
       sql`(${t.visibility} = 'public') = (${t.publicSlug} IS NOT NULL)`,
     ),
+  ],
+);
+
+/* Recommendation canvas. Nodes are derived from list_entry at read time; only these are stored. */
+
+/** Where a series sits on its owner's canvas. Kept when the series leaves the list. */
+export const canvasPosition = pgTable(
+  'canvas_position',
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    seriesId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
+    x: doublePrecision().notNull(),
+    y: doublePrecision().notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.seriesId] })],
+);
+
+/** An undirected link, stored once with the lower series id first. The api normalizes the pair. */
+export const canvasLink = pgTable(
+  'canvas_link',
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    seriesLowId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
+    seriesHighId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
+    kind: canvasLinkKind().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.seriesLowId, t.seriesHighId] }),
+    check('canvas_link_ordered_pair', sql`${t.seriesLowId} < ${t.seriesHighId}`),
   ],
 );

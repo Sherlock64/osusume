@@ -1,8 +1,10 @@
 import { createRoute } from '@tanstack/react-router';
 import { ListSeries } from '@/components/list-series';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
+import { TextLink } from '@/components/text-link';
 import { api } from '@/lib/api';
 import { isNotFoundError, request } from '@/lib/api-request';
+import { CANVAS_LABEL } from '@/lib/canvas-label';
 import { useCursorList } from '@/lib/pagination';
 import { appRoute } from '@/routes/app';
 
@@ -25,7 +27,12 @@ function MemberListPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold wrap-anywhere">{username}'s list</h1>
+      <h1 className="mb-1 text-xl font-semibold wrap-anywhere">{username}'s list</h1>
+      <p className="mb-4">
+        <TextLink to="/users/$username/constellations" params={{ username }}>
+          {CANVAS_LABEL}
+        </TextLink>
+      </p>
       {items.length === 0 ?
         <EmptyState title="This list is empty" />
       : <ul className="divide-y">
