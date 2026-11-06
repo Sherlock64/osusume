@@ -226,3 +226,60 @@ at the leftover files, which stay on the volume until removed by hand.
   file in `apps/api/drizzle/`.
 - `pnpm db:migrate` applies migrations. It is a separate step and the api never runs it on
   startup. In a build, the same entry point is `node apps/api/dist/db/migrate.js`.
+
+## Known issues in v1
+
+None of these stop the site working. They are here to fix in a later session.
+
+Deployment:
+
+- Deleting the `osusume` namespace destroys the data for good, because the volumes use the `Delete`
+  reclaim policy. `helm uninstall` keeps it.
+- The ingress addon's default of 12 nginx workers exceeds the pod's process limit on this host, and
+  requests hang. It is set to `worker-processes: "2"` in the `ingress-nginx-controller` ConfigMap.
+  Re-enabling the addon may reset it.
+- The minikube steps omit `minikube start` and `minikube addons enable ingress`.
+- The image tag comes from the commit hash, so rebuilding uncommitted changes keeps the old pods.
+- `--from-literal` in the SMTP Secret command leaves the password in shell history. Use
+  `--from-file=SMTP_PASSWORD=/dev/stdin` instead.
+- `pnpm smoke` defaults to port 8080, the real install, and uses up its login rate limit. Restarting
+  the api clears the limit.
+- Everyone coming through the port-forward shares one login rate limit bucket.
+- Volume sizes can't be changed after install.
+- Postgres starts as root, and no container sets a seccomp profile or a read-only root filesystem.
+- Upgrades use the Recreate strategy, so expect brief 503s.
+
+Security, to revisit before production:
+
+- `/api/v1` CSRF protection relies on `SameSite=Lax`, with no Origin check.
+- Setup and email-change pages submit their token on open, so a mail scanner that runs JavaScript
+  could use up a link. A Confirm button would prevent it.
+- Friend requests have no rate limit, so usernames can be probed.
+- `POST /api/auth/reset-password` answers 500 to a NUL byte in the token, because `/api/auth` is
+  outside the `/api/v1` input check. It also doesn't get the default `Cache-Control`.
+- The site runs on plain HTTP, and session cookies are not `Secure` at that address.
+
+App:
+
+- The 10-per-hour invite limit also applies to admins and its message is vague, so inviting a large
+  group at once fails with "Too many attempts".
+- The login rate limit message gives no wait time.
+- The largest possible catalog request can exceed the 1 MiB JSON body limit.
+- Dead setup and invite link pages have no link to anywhere.
+- A friend's list heading uses the casing from the URL (`/users/ben` shows "ben's list"), and "Friend
+  request sent to" echoes the casing typed.
+- "Request completed" after an email change doesn't say to check the inbox.
+- Series detail pages walk all of `GET /me/list`. A `GET /me/list/{seasonId}` or a series filter would
+  stop that.
+- The web build warns about a JS chunk over 500 kB. It needs code splitting.
+- A short search query such as `a` matches loosely, because the typo threshold is 0.35. It was only
+  tried on about 40 series.
+
+Not tested yet:
+
+- Expired links, and clicking an email-change link while logged out.
+- Refused email changes (address in use or blacklisted).
+- Moving a season to another series, season-specific covers, and removing an image in the UI.
+- Rejecting a username change in the admin screen, and declining a friend request.
+- Keyboard and screen-reader use, and browsers other than Chromium.
+- A real `helm upgrade` or `helm uninstall` on the live install. Both were tested on a test install.
