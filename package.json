@@ -16,6 +16,7 @@
     "dev:web": "pnpm --filter @osusume/web dev",
     "dev:services": "podman compose -f infra/compose.dev.yaml up -d",
     "dev:services:down": "podman compose -f infra/compose.dev.yaml down",
+    "smoke": "pnpm --filter @osusume/e2e smoke",
     "db:generate": "pnpm --filter @osusume/api db:generate",
     "db:migrate": "pnpm --filter @osusume/api db:migrate"
   },

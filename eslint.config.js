@@ -20,7 +20,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['apps/api/**/*.ts', 'packages/shared/**/*.ts'],
+    files: ['apps/api/**/*.ts', 'packages/shared/**/*.ts', 'e2e/**/*.ts'],
     languageOptions: { globals: globals.node },
   },
   {
