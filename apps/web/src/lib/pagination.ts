@@ -21,3 +21,17 @@ export function useCursorList<Item>(options: {
   });
   return { query, items: query.data?.pages.flatMap((page) => page.items) ?? [] };
 }
+
+/** Every page of a cursor-paginated endpoint, for what a screen needs whole, like a dropdown. */
+export async function fetchAllPages<Item>(
+  fetchPage: (cursor: string | undefined) => Promise<Page<Item>>,
+): Promise<Item[]> {
+  const items: Item[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await fetchPage(cursor);
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor !== undefined);
+  return items;
+}

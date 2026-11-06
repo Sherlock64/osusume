@@ -13,6 +13,7 @@ const sessionResponseSchema = z
       displayUsername: z.string().nullish(),
       email: z.string(),
       role: userRoleSchema,
+      isFirstAdmin: z.boolean().nullish(),
     }),
   })
   .nullable();
@@ -23,6 +24,8 @@ export interface SessionUser {
   username: string;
   email: string;
   role: z.infer<typeof userRoleSchema>;
+  /** The first admin is permanent, so they are not offered deleting their account. */
+  isFirstAdmin: boolean;
 }
 
 /** The logged-in user, or null. A failed check throws, so an outage doesn't look like a logout. */
@@ -32,8 +35,12 @@ export const sessionQuery = queryOptions({
   queryFn: async (): Promise<SessionUser | null> => {
     const session = sessionResponseSchema.parse(await authRequest(authClient.getSession()));
     if (!session) return null;
-    const { displayUsername, ...user } = session.user;
-    return { ...user, username: displayUsername ?? user.username };
+    const { displayUsername, isFirstAdmin, ...user } = session.user;
+    return {
+      ...user,
+      username: displayUsername ?? user.username,
+      isFirstAdmin: isFirstAdmin === true,
+    };
   },
 });
 

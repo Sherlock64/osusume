@@ -26,6 +26,11 @@ export function toApiError(error: unknown): ApiError {
   return new ApiError(0, 'network_error', 'Could not reach the server. Please try again.');
 }
 
+/** The api's answer for something that isn't there. A malformed id in the address gets a 400. */
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && (error.status === 404 || error.status === 400);
+}
+
 function fallbackError(status: number, message?: string): ApiError {
   if (status === 429) {
     return new ApiError(429, 'rate_limited', 'Too many attempts. Please wait and try again.');

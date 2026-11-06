@@ -4,8 +4,18 @@ import { createQueryClient } from '@/lib/query-client';
 import { sessionQuery } from '@/lib/session';
 import { acceptInviteRoute } from '@/routes/accept-invite';
 import { appRoute } from '@/routes/app';
+import { catalogRoute } from '@/routes/app/catalog';
+import { compareRoute } from '@/routes/app/compare';
+import { friendsRoute } from '@/routes/app/friends';
 import { homeRoute } from '@/routes/app/home';
+import { invitesRoute } from '@/routes/app/invites';
+import { memberListRoute } from '@/routes/app/member-list';
 import { notFoundRoute } from '@/routes/app/not-found';
+import { newRequestRoute } from '@/routes/app/new-request';
+import { requestsRoute } from '@/routes/app/requests';
+import { seasonRoute } from '@/routes/app/season';
+import { seriesRoute } from '@/routes/app/series';
+import { settingsRoute } from '@/routes/app/settings';
 import { forgotPasswordRoute } from '@/routes/forgot-password';
 import { loginRoute } from '@/routes/login';
 import { publicListRoute } from '@/routes/public-list';
@@ -38,7 +48,20 @@ export const router = createRouter({
     verifyChangeRoute,
     publicListRoute,
     // Pages that need a login go here, and in `@/app/nav` if they get a menu entry.
-    appRoute.addChildren([homeRoute, notFoundRoute]),
+    appRoute.addChildren([
+      homeRoute,
+      catalogRoute,
+      seriesRoute,
+      seasonRoute,
+      requestsRoute,
+      newRequestRoute,
+      memberListRoute,
+      friendsRoute,
+      compareRoute,
+      invitesRoute,
+      settingsRoute,
+      notFoundRoute,
+    ]),
   ]),
   context: { queryClient },
   defaultErrorComponent: RouteError,

@@ -33,6 +33,16 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: (() =
   );
 }
 
+/** Stands in for a query's data while it loads or after it fails. */
+export function QueryFallback({
+  query,
+}: {
+  query: { isError: boolean; error: unknown; refetch: () => unknown };
+}) {
+  if (!query.isError) return <LoadingState />;
+  return <ErrorState error={query.error} onRetry={() => void query.refetch()} />;
+}
+
 interface LoadMoreQuery {
   hasNextPage: boolean;
   isFetchingNextPage: boolean;

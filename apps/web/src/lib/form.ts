@@ -96,3 +96,29 @@ export function useForm<S extends z.ZodType>({
 
   return { errors, handleSubmit, pending: mutation.isPending };
 }
+
+export interface FormRounds {
+  /** The form's `key`, which starts it over after each success. */
+  formKey: number;
+  /** What to say about the last success, until the next attempt. */
+  message: string | null;
+  start: () => void;
+  finish: (message: string) => void;
+}
+
+/** For a form that stays on screen and can be used again after it succeeds. */
+export function useFormRounds(): FormRounds {
+  const [formKey, setFormKey] = useState(0);
+  const [message, setMessage] = useState<string | null>(null);
+  return {
+    formKey,
+    message,
+    start: () => {
+      setMessage(null);
+    },
+    finish: (next) => {
+      setMessage(next);
+      setFormKey((key) => key + 1);
+    },
+  };
+}
