@@ -141,26 +141,6 @@ test('an oversized JSON body is refused, without logging in', async ({ request }
   expect(response.status()).toBe(413);
 });
 
-// Last, because it uses up this address's login attempts for the next 10 seconds.
-test('a client-set X-Forwarded-For does not get around the login rate limit', async ({
-  request,
-  baseURL,
-}) => {
-  const statuses: number[] = [];
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    const response = await request.post('/api/auth/sign-in/username', {
-      headers: {
-        Origin: String(baseURL),
-        'X-Forwarded-For': `203.0.113.${String(attempt + 1)}`,
-      },
-      data: { username: 'smoke_nobody', password: 'not-the-password' },
-    });
-    statuses.push(response.status());
-  }
-  expect(statuses).toContain(429);
-  expect(statuses.at(-1)).toBe(429);
-});
-
 test('the constellations page shows a series that was added to the list', async ({ page }) => {
   test.skip(!adminReady, 'needs an admin: set SMOKE_ADMIN_USERNAME and SMOKE_ADMIN_PASSWORD');
 
@@ -192,4 +172,24 @@ test('the constellations page shows a series that was added to the list', async 
     const removed = await page.request.delete(`/api/v1/series/${id}`);
     expect(removed.ok()).toBe(true);
   }
+});
+
+// Last, because it uses up this address's login attempts for the next 10 seconds.
+test('a client-set X-Forwarded-For does not get around the login rate limit', async ({
+  request,
+  baseURL,
+}) => {
+  const statuses: number[] = [];
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await request.post('/api/auth/sign-in/username', {
+      headers: {
+        Origin: String(baseURL),
+        'X-Forwarded-For': `203.0.113.${String(attempt + 1)}`,
+      },
+      data: { username: 'smoke_nobody', password: 'not-the-password' },
+    });
+    statuses.push(response.status());
+  }
+  expect(statuses).toContain(429);
+  expect(statuses.at(-1)).toBe(429);
 });

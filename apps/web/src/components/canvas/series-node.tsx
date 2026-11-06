@@ -79,7 +79,8 @@ export function SeriesNode({ data, dragging }: NodeProps<SeriesFlowNode>) {
         to="/series/$id"
         params={{ id: data.seriesId }}
         draggable={false}
-        className={buttonVariants({ variant: 'outline', size: 'sm' })}
+        // xyflow turns off pointer events on nodes that can't be dragged or connected; the button must still work.
+        className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'pointer-events-auto')}
         onPointerDown={(event) => {
           pressedAt.current = { x: event.clientX, y: event.clientY };
         }}

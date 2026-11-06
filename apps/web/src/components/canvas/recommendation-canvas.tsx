@@ -71,7 +71,7 @@ function LegendLine({ kind }: { kind: CanvasLinkKind }) {
 
 function Legend() {
   return (
-    <Panel position="top-left">
+    <Panel position="bottom-center">
       <div className="bg-card text-card-foreground flex flex-col gap-1 rounded-lg border px-2.5 py-2 text-xs">
         <span className="flex items-center gap-2">
           <LegendLine kind="recommend" />
@@ -197,9 +197,13 @@ export function RecommendationCanvas({
 
   const onConnectEnd: OnConnectEnd = (event, state) => {
     const from = state.fromNode?.id;
-    const to = state.toNode?.id;
+    const point = pointOf(event);
+    // Dropping anywhere on a node counts, not only exactly on one of its handles.
+    const to =
+      state.toNode?.id ??
+      document.elementFromPoint(point.x, point.y)?.closest<HTMLElement>('.react-flow__node')?.dataset.id;
     if (from === undefined || to === undefined || from === to) return;
-    setMenu({ type: 'connect', ...pointOf(event), seriesAId: from, seriesBId: to });
+    setMenu({ type: 'connect', ...point, seriesAId: from, seriesBId: to });
   };
 
   const chooseKind = (kind: CanvasLinkKind) => {
@@ -225,6 +229,8 @@ export function RecommendationCanvas({
         edgesFocusable={interactive}
         onlyRenderVisibleElements
         fitView
+        // On a phone, keep nodes legible and tappable even if they don't all fit.
+        fitViewOptions={coarse ? { minZoom: 0.6 } : undefined}
         minZoom={0.1}
         onNodesChange={(changes: NodeChange<SeriesFlowNode>[]) => {
           setNodes((current) => applyNodeChanges(changes, current));
