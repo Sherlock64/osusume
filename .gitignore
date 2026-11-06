@@ -1,0 +1,24 @@
+PRD/
+
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.tsbuildinfo
+.vite/
+
+# Test output
+coverage/
+e2e/.results/
+
+# Local environment
+.data/
+.env
+.env.*
+!.env.example
+infra/helm/values.local.yaml
+
+# Logs and OS files
+*.log
+.DS_Store

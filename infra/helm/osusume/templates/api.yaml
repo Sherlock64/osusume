@@ -1,0 +1,121 @@
+{{- $from := required "smtp.from is required: set it in a values file outside git, such as infra/helm/values.local.yaml" .Values.smtp.from -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-images
+  labels:
+    {{- include "osusume.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  accessModes: [ReadWriteOnce]
+  {{- with .Values.imageStorage.storageClassName }}
+  storageClassName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.imageStorage.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "osusume.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "osusume.selector" (dict "root" . "component" "api") | nindent 4 }}
+  ports:
+    - port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "osusume.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  # See the note on replicas in values.yaml. Not a value: rate limits depend on it.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "osusume.selector" (dict "root" . "component" "api") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "osusume.labels" . | nindent 8 }}
+        app.kubernetes.io/component: api
+    spec:
+      securityContext:
+        {{- include "osusume.nonRootPod" (dict "uid" 1000) | nindent 8 }}
+      initContainers:
+        - name: wait-for-migrations
+          image: {{ include "osusume.apiImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: [node, dist/db/wait-for-migrations.js]
+          env:
+            {{- include "osusume.databaseUrlEnv" . | nindent 12 }}
+          securityContext:
+            {{- include "osusume.nonRootContainer" . | nindent 12 }}
+      containers:
+        - name: api
+          image: {{ include "osusume.apiImage" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PUBLIC_BASE_URL
+              value: {{ .Values.publicBaseUrl | quote }}
+            - name: AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "osusume.secretName" . }}
+                  key: AUTH_SECRET
+            {{- include "osusume.databaseUrlEnv" . | nindent 12 }}
+            - name: SMTP_HOST
+              value: {{ .Values.smtp.host | quote }}
+            - name: SMTP_PORT
+              value: {{ .Values.smtp.port | quote }}
+            - name: SMTP_SECURE
+              value: {{ .Values.smtp.secure | quote }}
+            - name: SMTP_FROM
+              value: {{ $from | quote }}
+            {{- with .Values.smtp.existingSecret }}
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: SMTP_USER
+            - name: SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . }}
+                  key: SMTP_PASSWORD
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /api/v1/health/ready
+              port: http
+            periodSeconds: 5
+          # Liveness leaves the database out: restarting the api would not fix a database outage.
+          livenessProbe:
+            httpGet:
+              path: /api/v1/health
+              port: http
+            periodSeconds: 15
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          securityContext:
+            {{- include "osusume.nonRootContainer" . | nindent 12 }}
+          volumeMounts:
+            - name: images
+              mountPath: /var/lib/osusume/images
+      volumes:
+        - name: images
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-images

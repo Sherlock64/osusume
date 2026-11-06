@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/*.tsbuildinfo
+**/.vite
+.git
+.claude
+.data
+PRD
+coverage
+infra
+!infra/nginx/web.conf
+.env
+.env.*
+**/*.log
