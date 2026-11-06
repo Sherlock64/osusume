@@ -4,6 +4,14 @@ import { createQueryClient } from '@/lib/query-client';
 import { sessionQuery } from '@/lib/session';
 import { acceptInviteRoute } from '@/routes/accept-invite';
 import { appRoute } from '@/routes/app';
+import { adminIndexRoute, adminRoute } from '@/routes/app/admin';
+import { adminCatalogRoute } from '@/routes/app/admin-catalog';
+import { adminInvitesRoute } from '@/routes/app/admin-invites';
+import { adminRequestsRoute } from '@/routes/app/admin-requests';
+import { adminSeriesRoute } from '@/routes/app/admin-series';
+import { adminTagsRoute } from '@/routes/app/admin-tags';
+import { adminUsernameChangesRoute } from '@/routes/app/admin-username-changes';
+import { adminUsersRoute } from '@/routes/app/admin-users';
 import { catalogRoute } from '@/routes/app/catalog';
 import { compareRoute } from '@/routes/app/compare';
 import { friendsRoute } from '@/routes/app/friends';
@@ -60,6 +68,16 @@ export const router = createRouter({
       compareRoute,
       invitesRoute,
       settingsRoute,
+      adminRoute.addChildren([
+        adminIndexRoute,
+        adminInvitesRoute,
+        adminRequestsRoute,
+        adminCatalogRoute,
+        adminSeriesRoute,
+        adminTagsRoute,
+        adminUsersRoute,
+        adminUsernameChangesRoute,
+      ]),
       notFoundRoute,
     ]),
   ]),

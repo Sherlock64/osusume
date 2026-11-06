@@ -19,6 +19,12 @@ export const navItems: NavItem[] = [
   { to: '/compare', label: 'Compare' },
   { to: '/invites', label: 'Invites' },
   { to: '/settings', label: 'Settings' },
+  { to: '/admin/invites', label: 'Invite queue', adminOnly: true },
+  { to: '/admin/requests', label: 'Catalog requests', adminOnly: true },
+  { to: '/admin/catalog', label: 'Manage catalog', adminOnly: true },
+  { to: '/admin/tags', label: 'Tags', adminOnly: true },
+  { to: '/admin/users', label: 'Users', adminOnly: true },
+  { to: '/admin/username-changes', label: 'Username changes', adminOnly: true },
 ];
 
 export function visibleNavItems(items: readonly NavItem[], role: UserRole): NavItem[] {

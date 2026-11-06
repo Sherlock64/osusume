@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link, useRouter } from '@tanstack/react-router';
 import { Menu, X } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
-import { navItems, visibleNavItems } from '@/app/nav';
+import { navItems, visibleNavItems, type NavItem } from '@/app/nav';
 import { Button } from '@/components/ui/button';
 import { authRequest, toApiError } from '@/lib/api-request';
 import { authClient } from '@/lib/auth-client';
@@ -26,7 +26,8 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
   const [menuOpen, setMenuOpen] = useState(false);
   const logout = useLogout();
 
-  const links = visibleNavItems(navItems, user.role).map((item) => (
+  const visible = visibleNavItems(navItems, user.role);
+  const toLink = (item: NavItem) => (
     <Link
       key={item.label}
       to={item.to}
@@ -39,7 +40,9 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
     >
       {item.label}
     </Link>
-  ));
+  );
+  const links = visible.filter((item) => item.adminOnly !== true).map(toLink);
+  const adminLinks = visible.filter((item) => item.adminOnly === true).map(toLink);
 
   return (
     <div className="min-h-svh">
@@ -77,10 +80,27 @@ export function AppShell({ user, children }: { user: SessionUser; children: Reac
             </Button>
           </div>
         </div>
-        {menuOpen && (
-          <nav aria-label="Main" className="flex flex-col gap-1 border-t px-4 py-2 md:hidden">
-            {links}
+        {adminLinks.length > 0 && (
+          <nav
+            aria-label="Admin"
+            className="mx-auto hidden max-w-5xl flex-wrap items-center gap-1 px-4 pb-2 md:flex"
+          >
+            <span className="text-muted-foreground mr-2 text-sm">Admin</span>
+            {adminLinks}
           </nav>
+        )}
+        {menuOpen && (
+          <div className="border-t px-4 py-2 md:hidden">
+            <nav aria-label="Main" className="flex flex-col gap-1">
+              {links}
+            </nav>
+            {adminLinks.length > 0 && (
+              <nav aria-label="Admin" className="mt-2 flex flex-col gap-1 border-t pt-2">
+                <span className="text-muted-foreground px-3 text-sm">Admin</span>
+                {adminLinks}
+              </nav>
+            )}
+          </div>
         )}
         {logout.isError && (
           <p role="alert" className="text-destructive px-4 pb-2 text-right text-sm">

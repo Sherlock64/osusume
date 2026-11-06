@@ -1,18 +1,16 @@
-import { SEARCH_QUERY_MAX_LENGTH, seasonsOfYear, type CatalogProposal } from '@osusume/shared';
+import type { CatalogProposal } from '@osusume/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { z } from 'zod';
-import { Form, SelectField, SubmitButton, TextareaField, TextField } from '@/components/form';
+import { Form, SubmitButton, TextareaField, TextField } from '@/components/form';
+import { SeasonFields } from '@/components/season-fields';
+import { SeriesSearch } from '@/components/series-search';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { TextLink } from '@/components/text-link';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { NativeSelectOption } from '@/components/ui/native-select';
 import { api } from '@/lib/api';
 import { isNotFoundError, request } from '@/lib/api-request';
-import { seasonOfYearLabels } from '@/lib/catalog-format';
 import { addSeasonFormSchema, newSeriesFormSchema } from '@/lib/catalog-request-form';
 import { useForm, type FormState } from '@/lib/form';
 import { appRoute } from '@/routes/app';
@@ -26,41 +24,6 @@ function useFileRequest() {
     await queryClient.invalidateQueries({ queryKey: ['catalog-requests'] });
     await navigate({ to: '/requests' });
   };
-}
-
-function SeasonFields({ form, prefix = '' }: { form: FormState; prefix?: string }) {
-  return (
-    <>
-      <div className="grid gap-4 sm:grid-cols-[8rem_1fr]">
-        <TextField form={form} name={`${prefix}ordinal`} label="Season number" inputMode="numeric" />
-        <TextField form={form} name={`${prefix}title`} label="Season title" />
-      </div>
-      <div className="grid gap-4 sm:grid-cols-3">
-        <TextField form={form} name={`${prefix}year`} label="Year (optional)" inputMode="numeric" />
-        <SelectField form={form} name={`${prefix}seasonOfYear`} label="Time of year (optional)">
-          <NativeSelectOption value="">Not known</NativeSelectOption>
-          {seasonsOfYear.map((season) => (
-            <NativeSelectOption key={season} value={season}>
-              {seasonOfYearLabels[season]}
-            </NativeSelectOption>
-          ))}
-        </SelectField>
-        <TextField
-          form={form}
-          name={`${prefix}episodeCount`}
-          label="Episodes (optional)"
-          inputMode="numeric"
-        />
-      </div>
-      <TextareaField
-        form={form}
-        name={`${prefix}altTitles`}
-        label="Alternate titles (optional)"
-        hint="One per line."
-      />
-      <TextareaField form={form} name={`${prefix}synopsis`} label="Synopsis (optional)" />
-    </>
-  );
 }
 
 function SuggestedTagsField({ form }: { form: FormState }) {
@@ -141,53 +104,13 @@ function AddSeasonForm({ seriesId }: { seriesId: string }) {
 /** Finds the series to add a season to. */
 function SeriesPicker() {
   const navigate = useNavigate({ from: '/requests/new' });
-  const [searched, setSearched] = useState('');
-  const results = useQuery({
-    queryKey: ['series', searched, '', 'picker'],
-    enabled: searched !== '',
-    queryFn: () => request(api.series.$get({ query: { q: searched } })),
-  });
-
   return (
-    <div className="flex flex-col gap-3">
-      <form
-        role="search"
-        className="flex flex-wrap items-end gap-2"
-        onSubmit={(event) => {
-          event.preventDefault();
-          const value = new FormData(event.currentTarget).get('q');
-          setSearched(typeof value === 'string' ? value.trim() : '');
-        }}
-      >
-        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
-          <Label htmlFor="request-series">Which series?</Label>
-          <Input id="request-series" name="q" type="search" maxLength={SEARCH_QUERY_MAX_LENGTH} />
-        </div>
-        <Button type="submit" variant="outline">
-          Search
-        </Button>
-      </form>
-      {searched !== '' &&
-        (results.data === undefined ?
-          <QueryFallback query={results} />
-        : results.data.items.length === 0 ?
-          <EmptyState title="No series found" />
-        : <ul className="flex flex-col gap-1">
-            {results.data.items.map((series) => (
-              <li key={series.id}>
-                <Button
-                  variant="ghost"
-                  className="h-auto w-full justify-start text-left whitespace-normal wrap-anywhere"
-                  onClick={() => {
-                    void navigate({ search: { seriesId: series.id } });
-                  }}
-                >
-                  {series.title}
-                </Button>
-              </li>
-            ))}
-          </ul>)}
-    </div>
+    <SeriesSearch
+      label="Which series?"
+      onPick={(series) => {
+        void navigate({ search: { seriesId: series.id } });
+      }}
+    />
   );
 }
 

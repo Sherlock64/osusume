@@ -37,11 +37,11 @@ const splitList = (value: string, separator: string | RegExp) =>
     .map((part) => part.trim())
     .filter((part) => part !== '');
 
-const titleField = z.string().trim().min(1).max(TITLE_MAX_LENGTH);
-const synopsisField = z.string().trim().max(SYNOPSIS_MAX_LENGTH);
+export const titleField = z.string().trim().min(1).max(TITLE_MAX_LENGTH);
+export const synopsisField = z.string().trim().max(SYNOPSIS_MAX_LENGTH);
 
 /** One title per line, since a title can hold a comma. */
-const altTitlesField = z
+export const altTitlesField = z
   .string()
   .refine(
     (value) => {
@@ -63,7 +63,7 @@ const suggestedTagsField = z
   )
   .transform((value) => splitList(value, ','));
 
-const seasonForm = z.object({
+export const seasonForm = z.object({
   ordinal: z
     .string()
     .trim()

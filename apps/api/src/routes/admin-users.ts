@@ -55,10 +55,10 @@ async function setFields(
   return row;
 }
 
-function actionRoute(action: string, summary: string) {
+function actionRoute<Action extends string>(action: Action, summary: string) {
   return createRoute({
     method: 'post',
-    path: `/admin/users/{id}/${action}`,
+    path: `/admin/users/{id}/${action}` as const,
     summary,
     security: sessionSecurity,
     middleware: requireAdmin,
@@ -75,10 +75,10 @@ function actionRoute(action: string, summary: string) {
   });
 }
 
-function removalRoute(action: string, summary: string) {
+function removalRoute<Action extends string>(action: Action, summary: string) {
   return createRoute({
     method: 'post',
-    path: `/admin/users/{id}/${action}`,
+    path: `/admin/users/{id}/${action}` as const,
     summary,
     security: sessionSecurity,
     middleware: requireAdmin,
