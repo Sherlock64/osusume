@@ -1,0 +1,92 @@
+# The whole site in containers, with mail going to Mailpit. See "Run it with Podman Compose" in the
+# README. Run infra/init-compose-env.sh once first: it generates the secrets into infra/.env.
+name: osusume
+
+x-api: &api-build
+  image: localhost/osusume-api:compose
+  build:
+    context: ..
+    dockerfile: Containerfile
+    target: api
+
+services:
+  proxy:
+    image: docker.io/nginxinc/nginx-unprivileged:1.29-alpine
+    restart: unless-stopped
+    environment:
+      NGINX_ENTRYPOINT_LOCAL_RESOLVERS: '1'
+    volumes:
+      - ./nginx/proxy.conf.template:/etc/nginx/templates/default.conf.template:ro
+    ports:
+      - 127.0.0.1:${OSUSUME_PORT:-8090}:8080
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_started
+
+  web:
+    image: localhost/osusume-web:compose
+    build:
+      context: ..
+      dockerfile: Containerfile
+      target: web
+    restart: unless-stopped
+
+  api:
+    <<: *api-build
+    restart: unless-stopped
+    environment:
+      PUBLIC_BASE_URL: http://localhost:${OSUSUME_PORT:-8090}
+      AUTH_SECRET: ${AUTH_SECRET:?run infra/init-compose-env.sh first}
+      DATABASE_URL: postgres://osusume:${POSTGRES_PASSWORD:?run infra/init-compose-env.sh first}@postgres:5432/osusume
+      SMTP_HOST: mailpit
+      SMTP_PORT: '1025'
+      SMTP_FROM: Osusume <no-reply@osusume.test>
+    volumes:
+      - images:/var/lib/osusume/images
+    healthcheck:
+      test: [CMD, wget, -q, -O, /dev/null, http://127.0.0.1:3000/api/v1/health/ready]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mailpit:
+        condition: service_started
+
+  # Runs on every `up`, before the api. Migrations already applied are skipped.
+  migrate:
+    <<: *api-build
+    command: [node, dist/db/migrate.js]
+    environment:
+      DATABASE_URL: postgres://osusume:${POSTGRES_PASSWORD:?run infra/init-compose-env.sh first}@postgres:5432/osusume
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: docker.io/library/postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: osusume
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run infra/init-compose-env.sh first}
+      POSTGRES_DB: osusume
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U osusume -d osusume]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  mailpit:
+    image: docker.io/axllent/mailpit:v1.33
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:${MAILPIT_PORT:-8026}:8025 # Web UI
+
+volumes:
+  postgres-data:
+  images:

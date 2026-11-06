@@ -1,0 +1,35 @@
+# The front door of the Compose stack. The image fills in env variables when it starts.
+
+# Containers get a new address when recreated, so names are looked up as requests arrive rather
+# than once at startup.
+resolver ${NGINX_LOCAL_RESOLVERS} valid=10s;
+
+server {
+    listen 8080;
+
+    # The api's limit is 10 MB plus multipart framing and answers with a proper error, so this only
+    # has to sit just above it.
+    client_max_body_size 11m;
+
+    set $api http://api:3000;
+    set $web http://web:8080;
+
+    proxy_set_header Host $http_host;
+    # Overwritten, never appended. The api's rate limits key on this: a value the client can
+    # influence would get around them, and an appended one would put all clients in one bucket.
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location /api/ {
+        proxy_pass $api;
+    }
+
+    # Crawlers ask at the site's root, and only the api knows the rules.
+    location = /robots.txt {
+        proxy_pass $api;
+    }
+
+    location / {
+        proxy_pass $web;
+    }
+}
