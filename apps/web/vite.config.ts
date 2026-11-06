@@ -12,6 +12,6 @@ export default defineConfig({
   },
   server: {
     // Same origin as production: the browser only ever talks to one host.
-    proxy: { '/api': 'http://localhost:3000' },
+    proxy: { '/api': process.env.API_PROXY_TARGET ?? 'http://localhost:3000' },
   },
 });

@@ -25,6 +25,17 @@ podman run -d --name osusume-dev-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:802
   docker.io/axllent/mailpit:v1.33
 ```
 
+## Web app
+
+`pnpm dev:web` serves the SPA on port 5173 and proxies `/api` to the api, so the browser sees one
+origin. `PUBLIC_BASE_URL` must be the address the browser uses, or Better Auth refuses its POSTs and
+emailed links go elsewhere. Pick other ports with `pnpm dev:web --port 5180` and
+`API_PROXY_TARGET=http://localhost:3460`.
+
+Routes live in `apps/web/src/routes`, assembled in `apps/web/src/router.tsx`. Pages that need a login
+are children of `appRoute`, which guards them and draws the shell; the menu is
+`apps/web/src/app/nav.ts`.
+
 ## Checks
 
 ```sh
