@@ -1,5 +1,6 @@
 import { createMiddleware } from 'hono/factory';
 import { etag } from 'hono/etag';
+import type { AppEnv } from './context.ts';
 
 /** Sets the headers on what a route answers with, and leaves its refusals uncached. */
 function cacheHeaders(cacheControl: string) {
@@ -23,3 +24,19 @@ export const revalidatedRead = [cacheHeaders('private, no-cache'), etag()] as co
  * store it. The route sets its own ETag and answers 304 itself.
  */
 export const immutableRead = cacheHeaders('private, max-age=604800, immutable');
+
+/**
+ * For per-user answers, before the auth middleware so that refusals carry it too. Nothing may be
+ * reused, not even a 404, because who may see a list can change at any time.
+ */
+export const privateNoStore = createMiddleware<AppEnv>(async (c, next) => {
+  await next();
+  c.res.headers.set('Cache-Control', 'private, no-store');
+  c.res.headers.set('Vary', 'Cookie');
+});
+
+/** For a public list, found or not: no cache may keep it, as the owner can hide it at any time. */
+export const publicNoStore = createMiddleware<AppEnv>(async (c, next) => {
+  await next();
+  c.res.headers.set('Cache-Control', 'no-store');
+});

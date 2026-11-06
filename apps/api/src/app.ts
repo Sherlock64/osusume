@@ -7,9 +7,12 @@ import { ApiError } from './lib/errors.ts';
 import { adminUserRoutes } from './routes/admin-users.ts';
 import { catalogRequestRoutes } from './routes/catalog-requests.ts';
 import { catalogRoutes } from './routes/catalog.ts';
+import { compareRoutes } from './routes/compare.ts';
+import { friendRoutes } from './routes/friends.ts';
 import { healthRoutes } from './routes/health.ts';
 import { imageRoutes } from './routes/images.ts';
 import { inviteRoutes } from './routes/invites.ts';
+import { listRoutes } from './routes/lists.ts';
 import { meRoutes } from './routes/me.ts';
 import { seriesImageRoutes } from './routes/series-images.ts';
 import { setupRoutes } from './routes/setup.ts';
@@ -36,7 +39,10 @@ export function createApp(dependencies: AppDependencies) {
     .route('/', catalogRoutes)
     .route('/', catalogRequestRoutes)
     .route('/', imageRoutes)
-    .route('/', seriesImageRoutes);
+    .route('/', seriesImageRoutes)
+    .route('/', listRoutes)
+    .route('/', friendRoutes)
+    .route('/', compareRoutes);
 
   routes.openAPIRegistry.registerComponent('securitySchemes', 'session', {
     type: 'apiKey',
@@ -53,6 +59,11 @@ export function createApp(dependencies: AppDependencies) {
   });
 
   const app = new OpenAPIHono().route('/api/v1', routes);
+
+  // Crawlers ask at the site's root, so this works only where the root forwards the path here.
+  app.get('/robots.txt', (c) =>
+    c.text('User-agent: *\nDisallow: /lists/\nDisallow: /api/v1/lists/\n'),
+  );
 
   app.on(['GET', 'POST'], `${AUTH_BASE_PATH}/*`, (c) => {
     const endpoints: readonly string[] = exposedAuthEndpoints[c.req.method as 'GET' | 'POST'];

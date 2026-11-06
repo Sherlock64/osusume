@@ -85,6 +85,31 @@ again each time, which rechecks the session, and an unchanged response costs a 3
 
 Writes that span rows take `lockCatalog` from `apps/api/src/lib/locks.ts`, before any row lock.
 
+## Lists and friends
+
+`GET /me/list` is the only list response with notes. It and `GET /users/{username}/list` (login
+required, at every tier) return a page of series by title; a series' status is derived on read and
+counts all its seasons in the catalog. `?status=` keeps a series if any of its listed seasons has
+that status, and `matched` marks those seasons.
+
+`canView` in `apps/api/src/social/lists.ts` is the one visibility check, behind the member view, the
+public view and `GET /compare`. Roles play no part, so an admin sees what any member would. A list
+with no `list_settings` row is private; the first `PUT /me/list-settings` creates the row. A missing
+user, a disabled user and a hidden list get the same 404, and compare marks them all unavailable,
+echoing the name as typed. `GET /compare` is not paginated and takes at most 100 usernames.
+
+`GET /lists/{slug}` needs no login and returns titles and status only, with `X-Robots-Tag: noindex`
+and `Cache-Control: no-store`. The slug exists only while the list is public, and going public again
+makes a new one. The api answers `GET /robots.txt`, but crawlers only ask at the site's root, so
+whatever serves that root must forward the path or serve the same rules.
+
+Friendships are one row per pair, in either direction. A declined, cancelled or unfriended pair
+leaves no row, so either side may ask again. `POST /friends/requests` answers a pair that already
+exists with a 409: `friend_request_already_sent`, `friend_request_incoming` or `already_friends`.
+Asking yourself is a 400, `friend_request_self`.
+
+Per-user answers here carry `Cache-Control: private, no-store`, refusals included.
+
 ## Images
 
 Uploads are validated by content, resized with sharp and served as WebP. Everything kept is
