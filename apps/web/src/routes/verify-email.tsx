@@ -28,7 +28,9 @@ function DeadLink() {
     <PublicCard
       title="This link isn't valid"
       description="It may have expired or already been used."
-    />
+    >
+      <TextLink to="/login">Go to log in</TextLink>
+    </PublicCard>
   );
 }
 

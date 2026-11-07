@@ -1,32 +1,38 @@
 import { listStatuses, listStatusSchema, type ListStatus, listStatusLabels } from '@osusume/shared';
 import { createRoute, Link } from '@tanstack/react-router';
 import { z } from 'zod';
-import { ListSeries } from '@/components/list-series';
+import { ListSeriesGrid } from '@/components/list-series';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
+import { StatusBadge } from '@/components/status-badge';
 import { TextLink } from '@/components/text-link';
 import { buttonVariants } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { ownListKey } from '@/lib/own-list';
 import { useCursorList } from '@/lib/pagination';
+import { cn } from '@/lib/utils';
 import { appRoute } from '@/routes/app';
 
 function StatusFilter({ current }: { current: ListStatus | undefined }) {
-  const options = [
-    { status: undefined, label: 'All' },
-    ...listStatuses.map((status) => ({ status, label: listStatusLabels[status] })),
-  ];
   return (
-    <nav aria-label="Filter by status" className="mb-2 flex flex-wrap gap-2">
-      {options.map(({ status, label }) => (
+    <nav aria-label="Filter by status" className="mb-6 flex flex-wrap gap-2">
+      {[undefined, ...listStatuses].map((status) => (
         <Link
-          key={label}
+          key={status ?? 'all'}
           to="/"
           search={status === undefined ? {} : { status }}
           aria-current={status === current ? 'true' : undefined}
           className={buttonVariants({ variant: status === current ? 'default' : 'outline', size: 'sm' })}
         >
-          {label}
+          {status === undefined ?
+            'All'
+          : <StatusBadge
+              status={status}
+              // Gold is a fill for dark text, so the chosen chip drops the status colour; its icon stays.
+              className={cn('border-0 bg-transparent px-0', status === current && 'text-primary-foreground')}
+            />
+          }
         </Link>
       ))}
     </nav>
@@ -50,7 +56,15 @@ function MyListPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">My list</h1>
+      <PageHeader
+        title="My list"
+        className="mb-4"
+        actions={
+          <Link to="/catalog" className={buttonVariants({ variant: 'outline' })}>
+            Browse the catalog
+          </Link>
+        }
+      />
       <StatusFilter current={status} />
       {query.data === undefined ?
         <QueryFallback query={query} />
@@ -59,12 +73,10 @@ function MyListPage() {
           <EmptyState title="Your list is empty">
             <TextLink to="/catalog">Find something in the catalog</TextLink>
           </EmptyState>
-        : <EmptyState title={`Nothing is marked ${listStatusLabels[status].toLowerCase()}`} />
-      : <ul className="divide-y">
-          {items.map((series) => (
-            <ListSeries key={series.seriesId} series={series} />
-          ))}
-        </ul>
+        : <EmptyState title={`Nothing is marked ${listStatusLabels[status].toLowerCase()}`}>
+            <TextLink to="/">Show the whole list</TextLink>
+          </EmptyState>
+      : <ListSeriesGrid series={items} />
       }
       <LoadMore query={query} />
     </>

@@ -1,6 +1,6 @@
-/** Footprint of a canvas node, in canvas units. */
-export const NODE_WIDTH = 160;
-export const NODE_HEIGHT = 232;
+/** Footprint of a canvas node in canvas units: its cover circle and the title plate under it (up to three lines, 224 wide). */
+export const NODE_WIDTH = 224;
+export const NODE_HEIGHT = 236;
 
 const GRID_GAP = 24;
 const CELL_WIDTH = NODE_WIDTH + GRID_GAP;
@@ -59,22 +59,4 @@ export function placeNodes(nodes: readonly PlaceableNode[]): PlacedNode[] {
     block(x, y);
     return { seriesId: node.seriesId, x, y, placed: true };
   });
-}
-
-export type Side = 'top' | 'right' | 'bottom' | 'left';
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-/** The sides a line between two nodes should leave and enter by: each node faces the other. */
-export function facingSides(from: Point, to: Point): { from: Side; to: Side } {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  // Compare in footprint units so a wide gap and a tall gap weigh the same.
-  if (Math.abs(dx) / NODE_WIDTH >= Math.abs(dy) / NODE_HEIGHT) {
-    return dx >= 0 ? { from: 'right', to: 'left' } : { from: 'left', to: 'right' };
-  }
-  return dy >= 0 ? { from: 'bottom', to: 'top' } : { from: 'top', to: 'bottom' };
 }

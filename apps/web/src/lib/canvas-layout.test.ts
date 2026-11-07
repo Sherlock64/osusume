@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { facingSides, NODE_HEIGHT, NODE_WIDTH, placeNodes, type PlaceableNode } from './canvas-layout';
+import { NODE_HEIGHT, NODE_WIDTH, placeNodes, type PlaceableNode } from './canvas-layout';
 
 const loose = (seriesId: string): PlaceableNode => ({ seriesId, x: null, y: null });
 
@@ -45,14 +45,5 @@ describe('placeNodes', () => {
 
   it('takes the origin on an empty canvas', () => {
     expect(placeNodes([loose('a')])).toEqual([{ seriesId: 'a', x: 0, y: 0, placed: true }]);
-  });
-});
-
-describe('facingSides', () => {
-  it('faces nodes toward each other along the dominant axis', () => {
-    expect(facingSides({ x: 0, y: 0 }, { x: 500, y: 20 })).toEqual({ from: 'right', to: 'left' });
-    expect(facingSides({ x: 0, y: 0 }, { x: -500, y: 20 })).toEqual({ from: 'left', to: 'right' });
-    expect(facingSides({ x: 0, y: 0 }, { x: 20, y: 500 })).toEqual({ from: 'bottom', to: 'top' });
-    expect(facingSides({ x: 0, y: 0 }, { x: 20, y: -500 })).toEqual({ from: 'top', to: 'bottom' });
   });
 });

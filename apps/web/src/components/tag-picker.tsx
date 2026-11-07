@@ -39,11 +39,14 @@ export function TagPicker({
         <ul aria-label="Chosen tags" className="flex flex-wrap gap-1">
           {chosen.map((tag) => (
             <li key={tag.id} className="max-w-full">
-              <Badge variant="secondary" className="h-auto max-w-full whitespace-normal wrap-anywhere">
+              <Badge
+                variant="secondary"
+                className="h-auto max-w-full overflow-visible pr-0.5 whitespace-normal wrap-anywhere"
+              >
                 {tag.name}
                 <button
                   type="button"
-                  className="ml-1 cursor-pointer"
+                  className="hover:bg-accent inline-flex size-11 shrink-0 md:size-6 cursor-pointer items-center justify-center rounded-xs"
                   aria-label={`Remove ${tag.name}`}
                   onClick={() => {
                     onChange(selected.filter((id) => id !== tag.id));
@@ -82,7 +85,7 @@ export function TagPicker({
                 type="button"
                 variant="outline"
                 size="sm"
-                className="h-auto max-w-full whitespace-normal wrap-anywhere"
+                className="h-auto min-h-11 max-w-full whitespace-normal wrap-anywhere md:min-h-8"
                 onClick={() => {
                   onChange([...selected, tag.id]);
                 }}

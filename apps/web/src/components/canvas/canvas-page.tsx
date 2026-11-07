@@ -1,7 +1,10 @@
 import type { CanvasLink, CanvasResponse } from '@osusume/shared';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { RecommendationCanvas } from '@/components/canvas/recommendation-canvas';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryFallback } from '@/components/states';
+import { TextLink } from '@/components/text-link';
+import { Alert } from '@/components/ui/alert';
 import { api } from '@/lib/api';
 import { CANVAS_LABEL } from '@/lib/canvas-label';
 import { isNotFoundError, request, toApiError } from '@/lib/api-request';
@@ -59,40 +62,63 @@ export function CanvasPage({ username, editable }: { username: string; editable:
   if (query.isError && isNotFoundError(query.error)) return <EmptyState title={`${CANVAS_LABEL} not found`} />;
   if (query.data === undefined) return <QueryFallback query={query} />;
 
-  const failedWrite = [move, setLink, removeLink].find((write) => write.isError);
-  return (
-    <>
-      <h1 className="mb-4 text-xl font-semibold wrap-anywhere">
-        {username}&apos;s {CANVAS_LABEL.toLowerCase()}
-      </h1>
-      {failedWrite !== undefined && (
-        <p role="alert" className="text-destructive mb-2 text-sm">
-          {toApiError(failedWrite.error).message}
-        </p>
-      )}
-      {query.data.nodes.length === 0 ?
+  const title = `${username}'s ${CANVAS_LABEL.toLowerCase()}`;
+  const { nodes, links } = query.data;
+  if (nodes.length === 0) {
+    return (
+      <>
+        <PageHeader title={title} />
         <EmptyState title={`No ${CANVAS_LABEL.toLowerCase()} yet`}>
           {editable ?
-            'Series you watch will appear here.'
-          : `${username} has no series on their list yet.`}
+            <>
+              Series you start watching appear here as stars, ready to be joined up.{' '}
+              <TextLink to="/catalog">Find something in the catalog</TextLink>
+            </>
+          : `${username} hasn't started anything on their list yet.`}
         </EmptyState>
-      : <div className="h-[calc(100svh-13rem)] min-h-96">
-          <RecommendationCanvas
-            nodes={query.data.nodes}
-            links={query.data.links}
-            editable={editable}
-            onMoveNodes={(positions) => {
-              move.mutate(positions);
-            }}
-            onSetLink={(link) => {
-              setLink.mutate(link);
-            }}
-            onRemoveLink={(seriesAId, seriesBId) => {
-              removeLink.mutate({ seriesAId, seriesBId });
-            }}
-          />
+      </>
+    );
+  }
+
+  const failedWrite = [move, setLink, removeLink].find((write) => write.isError);
+  return (
+    // The canvas takes the whole viewport under the shell's 56px header. Fixed, so a classic scrollbar can't add sideways scroll.
+    <div className="fixed inset-x-0 top-14 bottom-0">
+      <RecommendationCanvas
+        nodes={nodes}
+        links={links}
+        editable={editable}
+        onMoveNodes={(positions) => {
+          move.mutate(positions);
+        }}
+        onSetLink={(link) => {
+          setLink.mutate(link);
+        }}
+        onRemoveLink={(seriesAId, seriesBId) => {
+          removeLink.mutate({ seriesAId, seriesBId });
+        }}
+      />
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-start gap-2 p-4">
+        <div className="bg-card pointer-events-auto max-w-full rounded-lg border px-3 py-2">
+          <h1 className="text-xl leading-tight font-medium wrap-anywhere sm:text-2xl">{title}</h1>
+          <p className="text-muted-foreground mt-0.5 text-xs">
+            {nodes.length} series, {links.length} {links.length === 1 ? 'line' : 'lines'}
+            {!editable && (
+              <>
+                {' · '}
+                <TextLink to="/users/$username" params={{ username }} className="text-xs">
+                  See the list
+                </TextLink>
+              </>
+            )}
+          </p>
         </div>
-      }
-    </>
+        {failedWrite !== undefined && (
+          <Alert variant="destructive" className="bg-card pointer-events-auto max-w-md">
+            {toApiError(failedWrite.error).message}
+          </Alert>
+        )}
+      </div>
+    </div>
   );
 }

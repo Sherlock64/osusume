@@ -1,22 +1,20 @@
-import type { AdminUsernameChangeRequest, UsernameChangeRequestStatus } from '@osusume/shared';
+import {
+  usernameChangeRequestStatuses,
+  type AdminUsernameChangeRequest,
+  type UsernameChangeRequestStatus,
+} from '@osusume/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createRoute, useRouter } from '@tanstack/react-router';
 import { useState } from 'react';
-import { ActionButton, StatusFilter } from '@/components/admin';
+import { ActionButton, AdminRow, QueueBadge, StatusFilter } from '@/components/admin';
 import { ConfirmButton } from '@/components/confirm-button';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
-import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { useCursorList } from '@/lib/pagination';
 import { appRoute } from '@/routes/app';
 import { adminRoute } from '@/routes/app/admin';
-
-const statusLabels: Record<UsernameChangeRequestStatus, string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  rejected: 'Rejected',
-};
 
 function ChangeRow({ change }: { change: AdminUsernameChangeRequest }) {
   const { user } = appRoute.useRouteContext();
@@ -35,33 +33,33 @@ function ChangeRow({ change }: { change: AdminUsernameChangeRequest }) {
   };
 
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-        <h2 className="min-w-0 font-medium wrap-anywhere">
-          {change.status === 'pending' ?
-            `${change.currentUsername} → ${change.requestedUsername}`
-          : change.requestedUsername}
-        </h2>
-        <Badge variant={change.status === 'rejected' ? 'destructive' : 'secondary'}>
-          {statusLabels[change.status]}
-        </Badge>
-      </div>
-      <p className="text-muted-foreground text-sm">
-        Requested on {new Date(change.createdAt).toLocaleDateString()}
-        {change.status !== 'pending' && ` · account now named ${change.currentUsername}`}
-      </p>
-      {change.status === 'pending' && (
-        <div className="flex flex-wrap gap-2">
-          <ActionButton label="Approve" variant="default" onAction={() => decide('approve')} />
-          <ConfirmButton
-            label="Reject"
-            title={`Reject ${change.requestedUsername}?`}
-            description={`${change.currentUsername} keeps their current username, and can request another.`}
-            onConfirm={() => decide('reject')}
-          />
-        </div>
-      )}
-    </li>
+    <AdminRow
+      title={
+        change.status === 'pending' ?
+          `${change.currentUsername} → ${change.requestedUsername}`
+        : change.requestedUsername
+      }
+      badges={<QueueBadge state={change.status} />}
+      meta={
+        <p>
+          Requested on {new Date(change.createdAt).toLocaleDateString()}
+          {change.status !== 'pending' && ` · account now named ${change.currentUsername}`}
+        </p>
+      }
+      actions={
+        change.status === 'pending' && (
+          <>
+            <ActionButton label="Approve" variant="default" onAction={() => decide('approve')} />
+            <ConfirmButton
+              label="Reject"
+              title={`Reject ${change.requestedUsername}?`}
+              description={`${change.currentUsername} keeps their current username, and can request another.`}
+              onConfirm={() => decide('reject')}
+            />
+          </>
+        )
+      }
+    />
   );
 }
 
@@ -82,13 +80,17 @@ function AdminUsernameChangesPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Username changes</h1>
-      <StatusFilter value={status} labels={statusLabels} onChange={setStatus} />
+      <PageHeader
+        eyebrow="Admin"
+        title="Username changes"
+        description="Names members have asked to switch to. Approving renames the account straight away."
+      />
+      <StatusFilter value={status} statuses={usernameChangeRequestStatuses} onChange={setStatus} />
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
-        <EmptyState title="No username changes here" />
-      : <ul className="divide-y">
+        <EmptyState title={status === 'pending' ? 'No username changes are waiting' : 'No username changes here'} />
+      : <ul className="divide-y border-b">
           {items.map((change) => (
             <ChangeRow key={change.id} change={change} />
           ))}

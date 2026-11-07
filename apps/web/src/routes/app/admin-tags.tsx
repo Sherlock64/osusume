@@ -2,8 +2,10 @@ import { createTagSchema, updateTagSchema, type Tag } from '@osusume/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createRoute } from '@tanstack/react-router';
 import { useState } from 'react';
+import { AdminPanel } from '@/components/admin';
 import { ConfirmButton } from '@/components/confirm-button';
 import { Form, SubmitButton, TextField } from '@/components/form';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
@@ -48,7 +50,8 @@ function RenameForm({ tag, onDone }: { tag: Tag; onDone: () => void }) {
   });
   return (
     <Form form={form}>
-      <TextField form={form} name="name" label="Name" defaultValue={tag.name} autoComplete="off" />
+      {/* The Rename button it replaces had the focus. */}
+      <TextField form={form} name="name" label="Name" defaultValue={tag.name} autoComplete="off" autoFocus />
       <div className="flex flex-wrap gap-2">
         <SubmitButton form={form}>Save</SubmitButton>
         <Button type="button" variant="outline" onClick={onDone}>
@@ -62,25 +65,31 @@ function RenameForm({ tag, onDone }: { tag: Tag; onDone: () => void }) {
 function TagRow({ tag }: { tag: Tag }) {
   const queryClient = useQueryClient();
   const [renaming, setRenaming] = useState(false);
+  // Set once a rename closes, so the Rename button it replaced takes the focus back.
+  const [renamed, setRenamed] = useState(false);
   if (renaming) {
     return (
-      <li className="py-3">
-        <RenameForm
-          tag={tag}
-          onDone={() => {
-            setRenaming(false);
-          }}
-        />
+      <li className="border-b py-3">
+        <AdminPanel>
+          <RenameForm
+            tag={tag}
+            onDone={() => {
+              setRenaming(false);
+              setRenamed(true);
+            }}
+          />
+        </AdminPanel>
       </li>
     );
   }
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 py-3">
-      <span className="min-w-0 wrap-anywhere">{tag.name}</span>
+    <li className="flex flex-wrap items-center justify-between gap-2 border-b py-2">
+      <span className="min-w-0 text-sm font-medium wrap-anywhere">{tag.name}</span>
       <div className="flex flex-wrap gap-2">
         <Button
           variant="outline"
           size="sm"
+          autoFocus={renamed}
           onClick={() => {
             setRenaming(true);
           }}
@@ -106,25 +115,33 @@ function AdminTagsPage() {
   const tags = useQuery(tagsQuery);
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Tags</h1>
-      <div className="mb-6 max-w-md">
-        {rounds.message !== null && (
-          <Alert className="mb-4" role="status">
-            <AlertDescription className="wrap-anywhere">{rounds.message}</AlertDescription>
-          </Alert>
-        )}
-        <NewTagForm key={rounds.formKey} rounds={rounds} />
+      <PageHeader
+        eyebrow="Admin"
+        title="Tags"
+        description="The words members can filter by. A change reaches every series using the tag."
+      />
+      <div className="grid gap-8 lg:grid-cols-[18rem_minmax(0,1fr)] lg:gap-10">
+        <div className="min-w-0">
+          {rounds.message !== null && (
+            <Alert className="mb-4" role="status">
+              <AlertDescription className="wrap-anywhere">{rounds.message}</AlertDescription>
+            </Alert>
+          )}
+          <NewTagForm key={rounds.formKey} rounds={rounds} />
+        </div>
+        <div className="min-w-0">
+          {tags.data === undefined ?
+            <QueryFallback query={tags} />
+          : tags.data.length === 0 ?
+            <EmptyState title="No tags yet" />
+          : <ul className="grid gap-x-8 md:grid-cols-2">
+              {tags.data.map((tag) => (
+                <TagRow key={tag.id} tag={tag} />
+              ))}
+            </ul>
+          }
+        </div>
       </div>
-      {tags.data === undefined ?
-        <QueryFallback query={tags} />
-      : tags.data.length === 0 ?
-        <EmptyState title="No tags yet" />
-      : <ul className="divide-y">
-          {tags.data.map((tag) => (
-            <TagRow key={tag.id} tag={tag} />
-          ))}
-        </ul>
-      }
     </>
   );
 }

@@ -31,6 +31,7 @@ export function SeriesForm({
         name="altTitles"
         label="Alternate titles (optional)"
         hint="One per line."
+        className="min-h-16"
         defaultValue={series?.altTitles.join('\n')}
       />
       <TextareaField

@@ -1,14 +1,15 @@
 import type { CatalogProposal } from '@osusume/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { createRoute, useNavigate } from '@tanstack/react-router';
+import { createRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { z } from 'zod';
 import { Form, SubmitButton, TextareaField, TextField } from '@/components/form';
+import { PageHeader } from '@/components/page-header';
 import { SeasonFields, SeasonList } from '@/components/season-fields';
 import { SeriesSearch } from '@/components/series-search';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { TextLink } from '@/components/text-link';
-import { Button } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { isNotFoundError, request } from '@/lib/api-request';
 import { addSeasonFormSchema, newSeriesFormSchema } from '@/lib/catalog-request-form';
@@ -49,7 +50,9 @@ function NewSeriesForm() {
       <TextareaField form={form} name="synopsis" label="Synopsis (optional)" />
       <SuggestedTagsField form={form} />
       <SeasonList form={form} seasonKeys={seasonKeys} onChange={setSeasonKeys} />
-      <SubmitButton form={form}>Send request</SubmitButton>
+      <div>
+        <SubmitButton form={form}>Send request</SubmitButton>
+      </div>
     </Form>
   );
 }
@@ -65,7 +68,9 @@ function AddSeasonForm({ seriesId }: { seriesId: string }) {
     <Form form={form}>
       <SeasonFields form={form} />
       <SuggestedTagsField form={form} />
-      <SubmitButton form={form}>Send request</SubmitButton>
+      <div>
+        <SubmitButton form={form}>Send request</SubmitButton>
+      </div>
     </Form>
   );
 }
@@ -113,36 +118,50 @@ function NewRequestPage() {
   const { kind, seriesId } = newRequestRoute.useSearch();
   const addingSeason = kind === 'season' || seriesId !== undefined;
   return (
-    <div className="max-w-2xl">
-      <h1 className="mb-4 text-xl font-semibold">Request an addition</h1>
-      <nav aria-label="What to request" className="mb-4 flex flex-wrap gap-2">
-        <Button asChild size="sm" variant={addingSeason ? 'outline' : 'default'}>
-          <TextLink
-            to="/requests/new"
-            search={{}}
-            aria-current={addingSeason ? undefined : 'true'}
-            className="no-underline"
-          >
-            New series
-          </TextLink>
-        </Button>
-        <Button asChild size="sm" variant={addingSeason ? 'default' : 'outline'}>
-          <TextLink
-            to="/requests/new"
-            search={{ kind: 'season' }}
-            aria-current={addingSeason ? 'true' : undefined}
-            className="no-underline"
-          >
-            Season of an existing series
-          </TextLink>
-        </Button>
-      </nav>
-      {!addingSeason ?
-        <NewSeriesForm />
-      : seriesId === undefined ?
-        <SeriesPicker />
-      : <AddSeason key={seriesId} seriesId={seriesId} />}
-    </div>
+    <>
+      <PageHeader
+        title="Request an addition"
+        description="Ask for a series or a season the catalog is missing."
+        actions={
+          <Link to="/requests" className={buttonVariants({ variant: 'outline' })}>
+            My requests
+          </Link>
+        }
+      />
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,36rem)_18rem] lg:justify-between">
+        <div className="min-w-0">
+          <nav aria-label="What to request" className="mb-6 flex flex-wrap gap-2">
+            <Button asChild size="sm" variant={addingSeason ? 'outline' : 'default'}>
+              <Link to="/requests/new" search={{}} aria-current={addingSeason ? undefined : 'true'}>
+                New series
+              </Link>
+            </Button>
+            <Button asChild size="sm" variant={addingSeason ? 'default' : 'outline'}>
+              <Link
+                to="/requests/new"
+                search={{ kind: 'season' }}
+                aria-current={addingSeason ? 'true' : undefined}
+              >
+                Season of an existing series
+              </Link>
+            </Button>
+          </nav>
+          {!addingSeason ?
+            <NewSeriesForm />
+          : seriesId === undefined ?
+            <SeriesPicker />
+          : <AddSeason key={seriesId} seriesId={seriesId} />}
+        </div>
+        <aside className="text-muted-foreground border-t pt-4 text-sm lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
+          <p className="eyebrow mb-2">How it works</p>
+          <p>
+            Check the <TextLink to="/catalog">catalog</TextLink> first. An admin reviews each
+            request, may adjust it, and adds cover images once it's approved. You can follow it
+            under <TextLink to="/requests">My requests</TextLink>.
+          </p>
+        </aside>
+      </div>
+    </>
   );
 }
 

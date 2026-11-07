@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { createRoute } from '@tanstack/react-router';
 import { CoverImage } from '@/components/cover-image';
 import { ListEntryEditor } from '@/components/list-entry-editor';
+import { PageHeader, SectionHeading } from '@/components/page-header';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { TagList } from '@/components/tag-list';
 import { TextLink } from '@/components/text-link';
@@ -24,32 +25,37 @@ function SeasonPage() {
   const aired = formatAired(year, seasonOfYear);
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row">
-      <CoverImage cover={cover} size="medium" alt={title} className="w-40 shrink-0" />
-      <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <TextLink to="/series/$id" params={{ id: series.id }} className="wrap-anywhere">
-          {series.title}
-        </TextLink>
-        <h1 className="text-xl font-semibold wrap-anywhere">{title}</h1>
-        <p className="text-muted-foreground text-sm">
-          {[
+    <div className="grid gap-8 lg:grid-cols-[16rem_minmax(0,1fr)] xl:grid-cols-[16rem_minmax(0,1fr)_20rem]">
+      <CoverImage cover={cover} size="large" alt={title} title={title} className="w-40 self-start lg:w-full" />
+      <div className="flex min-w-0 flex-col gap-3">
+        <PageHeader
+          eyebrow={
+            <TextLink to="/series/$id" params={{ id: series.id }} className="wrap-anywhere">
+              {series.title}
+            </TextLink>
+          }
+          title={title}
+          description={[
             `Season ${String(ordinal)}`,
             aired,
             episodeCount === null ? null : `${String(episodeCount)} episodes`,
           ]
             .filter((part) => part !== null)
             .join(' · ')}
-        </p>
+          className="mb-1"
+        />
         {altTitles.length > 0 && (
           <p className="text-muted-foreground text-sm wrap-anywhere">{altTitles.join(' · ')}</p>
         )}
         <TagList tags={season.data.effectiveTags} />
-        {synopsis !== null && <p className="text-sm wrap-anywhere whitespace-pre-wrap">{synopsis}</p>}
-        <section className="mt-4 max-w-md">
-          <h2 className="mb-2 font-medium">My list</h2>
-          <ListEntryEditor seasonId={id} />
-        </section>
+        {synopsis !== null && (
+          <p className="mt-2 max-w-prose text-sm wrap-anywhere whitespace-pre-wrap">{synopsis}</p>
+        )}
       </div>
+      <section className="min-w-0 lg:col-start-2 xl:col-start-3 xl:row-start-1 xl:border-l xl:pl-8">
+        <SectionHeading>My list</SectionHeading>
+        <ListEntryEditor seasonId={id} title={title} />
+      </section>
     </div>
   );
 }

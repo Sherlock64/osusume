@@ -9,7 +9,7 @@ import { api } from '@/lib/api';
 import { ApiError, request } from '@/lib/api-request';
 import { useForm } from '@/lib/form';
 import { sessionQuery, setupStatusQuery } from '@/lib/session';
-import { rootRoute } from '@/routes/root';
+import { PublicRouteError, rootRoute } from '@/routes/root';
 
 function SetupPage() {
   const queryClient = useQueryClient();
@@ -88,4 +88,5 @@ export const setupRoute = createRoute({
     throw redirect({ to: user ? '/' : '/login' });
   },
   component: SetupPage,
+  errorComponent: PublicRouteError,
 });

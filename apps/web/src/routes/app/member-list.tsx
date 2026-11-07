@@ -1,7 +1,8 @@
-import { createRoute } from '@tanstack/react-router';
-import { ListSeries } from '@/components/list-series';
+import { createRoute, Link } from '@tanstack/react-router';
+import { ListSeriesGrid } from '@/components/list-series';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
-import { TextLink } from '@/components/text-link';
+import { buttonVariants } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { isNotFoundError, request } from '@/lib/api-request';
 import { CANVAS_LABEL } from '@/lib/canvas-label';
@@ -27,20 +28,21 @@ function MemberListPage() {
 
   return (
     <>
-      <h1 className="mb-1 text-xl font-semibold wrap-anywhere">{username}'s list</h1>
-      <p className="mb-4">
-        <TextLink to="/users/$username/constellations" params={{ username }}>
-          {CANVAS_LABEL}
-        </TextLink>
-      </p>
+      <PageHeader
+        title={`${username}'s list`}
+        actions={
+          <Link
+            to="/users/$username/constellations"
+            params={{ username }}
+            className={buttonVariants({ variant: 'outline' })}
+          >
+            {CANVAS_LABEL}
+          </Link>
+        }
+      />
       {items.length === 0 ?
         <EmptyState title="This list is empty" />
-      : <ul className="divide-y">
-          {items.map((series) => (
-            <ListSeries key={series.seriesId} series={series} />
-          ))}
-        </ul>
-      }
+      : <ListSeriesGrid series={items} />}
       <LoadMore query={query} />
     </>
   );

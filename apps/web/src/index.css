@@ -2,28 +2,19 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 @import "@fontsource-variable/geist";
+@import "@fontsource-variable/newsreader/opsz.css";
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-sans);
+    --font-heading: 'Newsreader Variable', Georgia, serif;
     --font-sans: 'Geist Variable', sans-serif;
-    --color-sidebar-ring: var(--sidebar-ring);
-    --color-sidebar-border: var(--sidebar-border);
-    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-    --color-sidebar-accent: var(--sidebar-accent);
-    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-    --color-sidebar-primary: var(--sidebar-primary);
-    --color-sidebar-foreground: var(--sidebar-foreground);
-    --color-sidebar: var(--sidebar);
-    --color-chart-5: var(--chart-5);
-    --color-chart-4: var(--chart-4);
-    --color-chart-3: var(--chart-3);
-    --color-chart-2: var(--chart-2);
-    --color-chart-1: var(--chart-1);
     --color-ring: var(--ring);
     --color-input: var(--input);
     --color-border: var(--border);
+    --color-link: var(--link);
+    --color-star: var(--star);
+    --color-scrim: var(--scrim);
     --color-destructive: var(--destructive);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
@@ -31,6 +22,7 @@
     --color-muted: var(--muted);
     --color-secondary-foreground: var(--secondary-foreground);
     --color-secondary: var(--secondary);
+    --color-primary-edge: var(--primary-edge);
     --color-primary-foreground: var(--primary-foreground);
     --color-primary: var(--primary);
     --color-popover-foreground: var(--popover-foreground);
@@ -39,6 +31,11 @@
     --color-card: var(--card);
     --color-foreground: var(--foreground);
     --color-background: var(--background);
+    --color-status-plan: var(--status-plan);
+    --color-status-watching: var(--status-watching);
+    --color-status-completed: var(--status-completed);
+    --color-status-hold: var(--status-hold);
+    --color-status-dropped: var(--status-dropped);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -48,83 +45,129 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Printed star atlas: warm paper, deep ink, thin rules. Gold is a fill only; text uses --link. */
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    color-scheme: light;
+    --radius: 0.5rem;
+    --background: #f4eedf;
+    --background-top: #f4eedf;
+    --foreground: #1a2233;
+    --card: #fbf8ef;
+    --card-foreground: #1a2233;
+    --popover: #fffdf6;
+    --popover-foreground: #1a2233;
+    --primary: #e5bd41;
+    --primary-foreground: #1a1505;
+    --primary-edge: #a67c12;
+    --secondary: #e8dfc9;
+    --secondary-foreground: #1a2233;
+    --muted: #eae2ce;
+    --muted-foreground: #55544c;
+    --accent: #e6dcc3;
+    --accent-foreground: #1a2233;
+    --destructive: #a1261a;
+    --border: #d6ccb3;
+    --input: #877c64;
+    --ring: #7f4f00;
+    --link: #7f4f00;
+    --star: #b98a14;
+    --speck: #1a2233;
+    /* Behind dialogs: a wash of sepia ink over the paper. */
+    --scrim: rgb(60 38 12 / 0.3);
+    --status-plan: #7a4c00;
+    --status-watching: #1c5597;
+    --status-completed: #1b6530;
+    --status-hold: #574790;
+    --status-dropped: #9c2840;
 }
 
+/* Night sky: near-black with ink-blue depth, warm cream text, gold as the one accent. */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
+    color-scheme: dark;
+    --background: #0b0e17;
+    --background-top: #101523;
+    --foreground: #f4ecdc;
+    --card: #121724;
+    --card-foreground: #f4ecdc;
+    --popover: #171d2c;
+    --popover-foreground: #f4ecdc;
+    --primary: #e5bd41;
+    --primary-foreground: #15110a;
+    --primary-edge: #e5bd41;
+    --secondary: #1f2638;
+    --secondary-foreground: #f4ecdc;
+    --muted: #1b2233;
+    --muted-foreground: #b7b2a4;
+    --accent: #252d42;
+    --accent-foreground: #f4ecdc;
+    --destructive: #ff9a8a;
+    --border: #2a3347;
+    --input: #6f788e;
+    --ring: #e5bd41;
+    --link: #e5bd41;
+    --star: #e5bd41;
+    --speck: #f4ecdc;
+    --scrim: rgb(0 0 0 / 0.6);
+    --status-plan: #e5bd41;
+    --status-watching: #8fbcf5;
+    --status-completed: #8fd29b;
+    --status-hold: #c5b9ec;
+    --status-dropped: #f5a0ad;
+}
+
+/* A plate caption: small, spaced capitals above a title or group. */
+@utility eyebrow {
+    @apply text-muted-foreground text-xs font-medium tracking-[0.14em] uppercase;
+}
+
+/* Tiled specks for logged-out pages only. Never behind running text on the app's pages. */
+@utility star-field {
+    background-image:
+        radial-gradient(1px 1px at 40px 60px, var(--speck), transparent),
+        radial-gradient(1px 1px at 130px 210px, var(--speck), transparent),
+        radial-gradient(1.5px 1.5px at 220px 90px, var(--speck), transparent),
+        radial-gradient(1px 1px at 300px 300px, var(--speck), transparent),
+        radial-gradient(1px 1px at 370px 150px, var(--speck), transparent),
+        radial-gradient(1.5px 1.5px at 90px 350px, var(--speck), transparent),
+        radial-gradient(1px 1px at 260px 380px, var(--speck), transparent);
+    background-size: 420px 420px;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+    @apply border-border;
+  }
+  /* The one focus ring. Components don't draw their own. */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   html {
     @apply font-sans;
-    }
+  }
+  body {
+    @apply text-foreground bg-background;
+    background-image: linear-gradient(var(--background-top), var(--background) 24rem);
+    background-repeat: no-repeat;
+  }
+  h1,
+  h2 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.01em;
+  }
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

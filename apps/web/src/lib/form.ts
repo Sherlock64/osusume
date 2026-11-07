@@ -84,6 +84,11 @@ export function useForm<S extends z.ZodType>({
     const checked = validate(schema, values);
     if ('errors' in checked) {
       setErrors(checked.errors);
+      // Inputs are named after their schema paths, so the first named in an error comes first on screen.
+      const first = [...event.currentTarget.elements].find(
+        (element) => element instanceof HTMLElement && (element.getAttribute('name') ?? '') in checked.errors.fields,
+      );
+      if (first instanceof HTMLElement) first.focus();
       return;
     }
     setErrors(noErrors);

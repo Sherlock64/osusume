@@ -15,7 +15,11 @@ import { rootRoute } from '@/routes/root';
 import { tokenSearchSchema } from '@/routes/search';
 
 function InvalidLink() {
-  return <PublicCard title="This invite link isn't valid" description="Ask for a new invite." />;
+  return (
+    <PublicCard title="This invite link isn't valid" description="Ask for a new invite.">
+      <TextLink to="/login">Already have an account? Log in</TextLink>
+    </PublicCard>
+  );
 }
 
 function AcceptForm({ token, email }: { token: string; email: string }) {
@@ -50,7 +54,13 @@ function AcceptForm({ token, email }: { token: string; email: string }) {
     <PublicCard title="Join Osusume" description="Choose a username and password.">
       <div className="flex flex-col gap-1.5">
         <Label htmlFor={emailId}>Email</Label>
-        <Input id={emailId} value={email} readOnly autoComplete="email" />
+        <Input
+          id={emailId}
+          value={email}
+          readOnly
+          autoComplete="email"
+          className="bg-muted text-muted-foreground hover:border-input"
+        />
       </div>
       <Form form={form}>
         <TextField

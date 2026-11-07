@@ -9,7 +9,7 @@ import { authRequest } from '@/lib/api-request';
 import { authClient } from '@/lib/auth-client';
 import { useForm } from '@/lib/form';
 import { setupStatusQuery } from '@/lib/session';
-import { rootRoute } from '@/routes/root';
+import { PublicRouteError, rootRoute } from '@/routes/root';
 
 function ForgotPasswordPage() {
   const [sent, setSent] = useState(false);
@@ -51,4 +51,5 @@ export const forgotPasswordRoute = createRoute({
     if (open) throw redirect({ to: '/setup' });
   },
   component: ForgotPasswordPage,
+  errorComponent: PublicRouteError,
 });

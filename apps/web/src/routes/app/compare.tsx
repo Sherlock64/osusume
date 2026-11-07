@@ -1,18 +1,34 @@
-import { usernameKey, type CompareResponse, type CompareRow, listStatusLabels } from '@osusume/shared';
+import { usernameKey, type CompareResponse, type CompareRow } from '@osusume/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { createRoute } from '@tanstack/react-router';
-import { X } from 'lucide-react';
+import { createRoute, Link } from '@tanstack/react-router';
+import { Plus, X } from 'lucide-react';
 import { useState } from 'react';
+import { CoverImage } from '@/components/cover-image';
+import { PageHeader, SectionHeading } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
-import { TextLink } from '@/components/text-link';
+import { StatusBadge } from '@/components/status-badge';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
-import { addCompareNames, compareGroups, isUnavailable, removeCompareName } from '@/lib/compare';
+import {
+  addCompareNames,
+  compareGroups,
+  isUnavailable,
+  removeCompareName,
+  type CompareGroup,
+} from '@/lib/compare';
 import { useCursorList } from '@/lib/pagination';
+import { cn } from '@/lib/utils';
 import { appRoute } from '@/routes/app';
+
+const groupNotes: Record<CompareGroup['id'], string> = {
+  onAll: 'Everyone has these.',
+  onSome: 'More than one of you, but not everyone.',
+  onOne: 'Only one of you has these.',
+};
 
 function QuickPicks({ names, onPick }: { names: string[]; onPick: (name: string) => void }) {
   const { query, items } = useCursorList({
@@ -29,18 +45,18 @@ function QuickPicks({ names, onPick }: { names: string[]; onPick: (name: string)
   if (picks.length === 0 && !query.hasNextPage) return null;
   return (
     <div className="mt-3">
-      <p className="mb-1 text-sm font-medium">Friends</p>
+      <p className="mb-1.5 text-sm font-medium">Friends</p>
       <div className="flex flex-wrap gap-2">
         {picks.map(({ id, username }) => (
           <Button
             key={id}
-            size="sm"
             variant="outline"
-            className="h-auto whitespace-normal wrap-anywhere"
+            className="h-auto min-h-11 whitespace-normal wrap-anywhere md:min-h-9"
             onClick={() => {
               onPick(username);
             }}
           >
+            <Plus />
             {username}
           </Button>
         ))}
@@ -60,18 +76,17 @@ function Person({
   onRemove: () => void;
 }) {
   return (
-    <li className="bg-secondary flex max-w-full items-center gap-1 rounded-md py-0.5 pr-0.5 pl-2 text-sm">
-      <span className="min-w-0 wrap-anywhere">
+    <li
+      className={cn(
+        'flex max-w-full items-center gap-1 rounded-md border pl-3 text-sm',
+        unavailable ? 'border-dashed' : 'bg-secondary border-transparent',
+      )}
+    >
+      <span className="min-w-0 py-1 font-medium wrap-anywhere">
         {name}
-        {unavailable && <span className="text-muted-foreground"> (not available)</span>}
+        {unavailable && <span className="text-muted-foreground font-normal"> (not available)</span>}
       </span>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-7 shrink-0"
-        aria-label={`Remove ${name}`}
-        onClick={onRemove}
-      >
+      <Button variant="ghost" size="icon" aria-label={`Remove ${name}`} onClick={onRemove}>
         <X />
       </Button>
     </li>
@@ -79,57 +94,129 @@ function Person({
 }
 
 function Row({ row, showsWho }: { row: CompareRow; showsWho: boolean }) {
+  const missing = row.statuses.filter(({ status }) => status === null);
   return (
-    <li className="py-3">
-      <h3 className="text-sm font-medium wrap-anywhere">
-        <TextLink to="/seasons/$id" params={{ id: row.seasonId }}>
-          {row.seriesTitle === row.seasonTitle ?
-            row.seasonTitle
-          : `${row.seriesTitle}: ${row.seasonTitle}`}
-        </TextLink>
-      </h3>
-      {showsWho && (
-        <p className="text-muted-foreground text-sm wrap-anywhere">On: {row.on.join(', ')}</p>
-      )}
-      <dl className="mt-1 grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 text-sm sm:max-w-md">
-        {row.statuses.map(({ username, status }) => (
-          <div key={username} className="contents">
-            <dt className="wrap-anywhere">{username}</dt>
-            <dd className={status === null ? 'text-muted-foreground' : undefined}>
-              {status === null ? 'Not on list' : listStatusLabels[status]}
-            </dd>
+    <tr className="group/row block py-3 md:table-row md:py-0">
+      <th
+        scope="row"
+        className="bg-background relative block text-left font-normal md:sticky md:left-0 md:z-10 md:table-cell md:py-2 md:pr-4"
+      >
+        <div className="flex items-center gap-3">
+          <CoverImage cover={row.cover} size="small" alt="" title={row.seriesTitle} className="w-14 shrink-0 md:w-11" />
+          <div className="min-w-0">
+            <Link
+              to="/seasons/$id"
+              params={{ id: row.seasonId }}
+              className="text-foreground text-sm font-medium wrap-anywhere group-hover/row:underline after:absolute after:inset-0 md:text-base"
+            >
+              {row.seasonTitle}
+            </Link>
+            {row.seriesTitle !== row.seasonTitle && (
+              <p className="text-muted-foreground text-xs wrap-anywhere">{row.seriesTitle}</p>
+            )}
           </div>
-        ))}
-      </dl>
-    </li>
+        </div>
+      </th>
+      {row.statuses.map(({ username, status }) => (
+        <td
+          key={username}
+          className={cn(
+            'mt-2 items-center justify-between gap-3 text-sm md:mt-0 md:table-cell md:py-2 md:pr-4',
+            status === null ? 'hidden' : 'flex',
+          )}
+        >
+          <span className="min-w-0 wrap-anywhere md:hidden">{username}</span>
+          {status === null ?
+            <span className="text-muted-foreground text-xs">Not on list</span>
+          : <StatusBadge status={status} />}
+        </td>
+      ))}
+      {showsWho && missing.length > 0 && (
+        // The table's own "Not on list" cells are hidden on phones; this one line stands in for them.
+        <td className="text-muted-foreground mt-2 block text-xs wrap-anywhere md:hidden">
+          Not on list: {missing.map(({ username }) => username).join(', ')}
+        </td>
+      )}
+    </tr>
   );
 }
 
-function Comparison({ comparison }: { comparison: CompareResponse['comparison'] }) {
-  if (comparison === null) return <NothingToCompare />;
+function Group({ group }: { group: CompareGroup }) {
+  const { id, title, rows, showsWho } = group;
   return (
-    <>
-      {compareGroups(comparison).map(({ id, title, rows, showsWho }) => (
-        <section key={id} className="mt-6">
-          <h2 className="font-medium">
-            {title} ({rows.length})
-          </h2>
-          {rows.length === 0 ?
-            <p className="text-muted-foreground mt-1 text-sm">Nothing here.</p>
-          : <ul className="divide-y">
+    <section id={id} className="mt-8 scroll-mt-32">
+      <SectionHeading actions={<Badge variant="secondary">{rows.length}</Badge>}>
+        {title}
+      </SectionHeading>
+      <p className="text-muted-foreground -mt-2 mb-3 text-sm">{groupNotes[id]}</p>
+      {rows.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="block w-full border-collapse md:table">
+            <thead className="hidden md:table-header-group">
+              <tr className="border-b">
+                <th scope="col" className="bg-background sticky left-0 z-10 min-w-64 pb-2 text-left">
+                  <span className="eyebrow">Season</span>
+                </th>
+                {rows[0]?.statuses.map(({ username }) => (
+                  <th
+                    key={username}
+                    scope="col"
+                    className="w-40 max-w-40 min-w-32 pr-4 pb-2 text-left align-bottom text-sm font-medium wrap-anywhere"
+                  >
+                    {username}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="block divide-y md:table-row-group">
               {rows.map((row) => (
                 <Row key={row.seasonId} row={row} showsWho={showsWho} />
               ))}
-            </ul>
-          }
-        </section>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Comparison({ result }: { result: CompareResponse }) {
+  const available = result.users.filter((person) => person.available).length;
+  // With two lists, "at least two but not all" can't happen.
+  const groups = compareGroups(result.comparison).filter(
+    ({ id }) => id !== 'onSome' || available > 2,
+  );
+  if (groups.length === 0) return <NothingToCompare />;
+  return (
+    <>
+      <nav
+        aria-label="Jump to a group"
+        className="bg-background sticky top-14 z-20 -mx-4 mt-6 flex gap-1 border-b px-4 py-2 sm:-mx-6 sm:px-6"
+      >
+        {groups.map(({ id, title, rows }) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            className="hover:bg-accent flex min-h-11 flex-1 flex-col justify-center rounded-md px-2 py-1 md:flex-none md:px-3"
+          >
+            <span className="font-heading text-xl leading-none font-medium">{rows.length}</span>
+            <span className="text-muted-foreground mt-0.5 text-xs">{title}</span>
+          </a>
+        ))}
+      </nav>
+      {groups.map((group) => (
+        <Group key={group.id} group={group} />
       ))}
     </>
   );
 }
 
 function NothingToCompare() {
-  return <EmptyState title="Nothing to compare">It takes at least two visible lists.</EmptyState>;
+  return (
+    <EmptyState title="Nothing to compare yet">
+      Add someone above. It takes at least two lists you're allowed to see.
+    </EmptyState>
+  );
 }
 
 function ComparePage() {
@@ -146,53 +233,69 @@ function ComparePage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Compare</h1>
-      <ul aria-label="People to compare" className="flex flex-wrap gap-2">
-        {names.map((name) => (
-          <Person
-            key={usernameKey(name)}
-            name={name}
-            unavailable={isUnavailable(result.data?.users ?? [], name)}
-            onRemove={() => {
-              setNames(removeCompareName(names, name));
+      <PageHeader
+        title="Compare"
+        description="See what your lists share, and where each of you stands on every season."
+      />
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <p className="eyebrow mb-2">Comparing</p>
+          {names.length === 0 ?
+            <p className="text-muted-foreground text-sm">Nobody yet.</p>
+          : <ul aria-label="People to compare" className="flex flex-wrap gap-2">
+              {names.map((name) => (
+                <Person
+                  key={usernameKey(name)}
+                  name={name}
+                  unavailable={isUnavailable(result.data?.users ?? [], name)}
+                  onRemove={() => {
+                    setNames(removeCompareName(names, name));
+                  }}
+                />
+              ))}
+            </ul>
+          }
+        </div>
+        <div>
+          <form
+            className="flex items-end gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              setNames(addCompareNames(names, typed));
+              setTyped('');
             }}
-          />
-        ))}
-      </ul>
-      <form
-        className="mt-3 flex flex-wrap items-end gap-2 sm:max-w-md"
-        onSubmit={(event) => {
-          event.preventDefault();
-          setNames(addCompareNames(names, typed));
-          setTyped('');
-        }}
-      >
-        <div className="flex min-w-48 flex-1 flex-col gap-1.5">
-          <Label htmlFor="compare-add">Add by exact username</Label>
-          <Input
-            id="compare-add"
-            autoComplete="off"
-            value={typed}
-            onChange={(event) => {
-              setTyped(event.target.value);
+          >
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <Label htmlFor="compare-add">Add by exact username</Label>
+              <Input
+                id="compare-add"
+                autoComplete="off"
+                value={typed}
+                onChange={(event) => {
+                  setTyped(event.target.value);
+                }}
+              />
+            </div>
+            <Button type="submit" variant="outline">
+              Add
+            </Button>
+          </form>
+          <QuickPicks
+            names={names}
+            onPick={(name) => {
+              setNames(addCompareNames(names, name));
             }}
           />
         </div>
-        <Button type="submit" variant="outline">
-          Add
-        </Button>
-      </form>
-      <QuickPicks
-        names={names}
-        onPick={(name) => {
-          setNames(addCompareNames(names, name));
-        }}
-      />
+      </div>
       {names.length === 0 ?
         <NothingToCompare />
       : result.data === undefined ?
         <QueryFallback query={result} />
-      : <Comparison comparison={result.data.comparison} />}
+      : <div aria-busy={result.isPlaceholderData} className={cn(result.isPlaceholderData && 'opacity-60')}>
+          <Comparison result={result.data} />
+        </div>
+      }
     </>
   );
 }

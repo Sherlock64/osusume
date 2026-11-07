@@ -1,10 +1,13 @@
+import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Constellation } from '@/components/logo-mark';
 import { Button } from '@/components/ui/button';
 import { toApiError } from '@/lib/api-request';
 
 export function LoadingState({ label = 'Loading…' }: { label?: string }) {
   return (
-    <p role="status" className="text-muted-foreground py-8 text-center text-sm">
+    <p role="status" className="text-muted-foreground flex items-center gap-2.5 py-10 text-sm">
+      <span className="bg-star size-1.5 animate-pulse rounded-full motion-reduce:animate-none" aria-hidden />
       {label}
     </p>
   );
@@ -12,9 +15,12 @@ export function LoadingState({ label = 'Loading…' }: { label?: string }) {
 
 export function EmptyState({ title, children }: { title: string; children?: ReactNode }) {
   return (
-    <div className="py-8 text-center">
-      <p className="font-medium">{title}</p>
-      {children !== undefined && <div className="text-muted-foreground mt-1 text-sm">{children}</div>}
+    <div className="flex items-center gap-5 py-10">
+      <Constellation index={0} className="text-muted-foreground/60 size-16 shrink-0" />
+      <div className="min-w-0">
+        <p className="font-heading text-xl font-medium">{title}</p>
+        {children !== undefined && <div className="text-muted-foreground mt-1 text-sm">{children}</div>}
+      </div>
     </div>
   );
 }
@@ -22,13 +28,16 @@ export function EmptyState({ title, children }: { title: string; children?: Reac
 /** A failed load, with the api's message. Pass `onRetry` if trying again could help. */
 export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: (() => void) | undefined }) {
   return (
-    <div role="alert" className="py-8 text-center">
-      <p className="font-medium">{toApiError(error).message}</p>
-      {onRetry !== undefined && (
-        <Button variant="outline" className="mt-3" onClick={onRetry}>
-          Try again
-        </Button>
-      )}
+    <div role="alert" className="flex items-start gap-3 py-10">
+      <TriangleAlert className="text-destructive mt-0.5 size-5 shrink-0" aria-hidden />
+      <div className="min-w-0">
+        <p className="font-medium">{toApiError(error).message}</p>
+        {onRetry !== undefined && (
+          <Button variant="outline" className="mt-3" onClick={onRetry}>
+            Try again
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
@@ -53,7 +62,7 @@ interface LoadMoreQuery {
 export function LoadMore({ query }: { query: LoadMoreQuery }) {
   if (!query.hasNextPage) return null;
   return (
-    <div className="pt-4 text-center">
+    <div className="flex justify-center pt-6">
       <Button
         variant="outline"
         disabled={query.isFetchingNextPage}

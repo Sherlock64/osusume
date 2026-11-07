@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "@osusume/shared": "workspace:*",
     "@tanstack/react-query": "^5.106.0",
     "@tanstack/react-router": "^1.170.46",

@@ -1,21 +1,21 @@
 import type { CanvasLink, CanvasLinkKind, CanvasNode } from '@osusume/shared';
 import {
   applyNodeChanges,
-  Background,
-  BackgroundVariant,
   ConnectionMode,
   Controls,
   Panel,
   ReactFlow,
-  type Edge,
+  useStore,
+  ViewportPortal,
   type NodeChange,
   type OnConnectEnd,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { CanvasMenu, MenuItem } from '@/components/canvas/canvas-menu';
+import { LinkEdge, LinkSample, type LinkFlowEdge } from '@/components/canvas/link-edge';
 import { SeriesNode, type SeriesFlowNode } from '@/components/canvas/series-node';
-import { facingSides, placeNodes } from '@/lib/canvas-layout';
+import { placeNodes } from '@/lib/canvas-layout';
 import './canvas.css';
 
 interface RecommendationCanvasProps {
@@ -27,13 +27,19 @@ interface RecommendationCanvasProps {
   onRemoveLink: (seriesAId: string, seriesBId: string) => void;
 }
 
-type LinkEdge = Edge<{ link: CanvasLink }>;
-
 type OpenMenu =
   | { type: 'connect'; x: number; y: number; seriesAId: string; seriesBId: string }
-  | { type: 'edge'; x: number; y: number; link: CanvasLink };
+  | { type: 'edge'; x: number; y: number; link: CanvasLink; from: SVGElement | null };
 
 const nodeTypes = { series: SeriesNode };
+const edgeTypes = { link: LinkEdge };
+
+// Room for the title block and legend, so the first fit doesn't start underneath them.
+const FIT_DESKTOP = { padding: { top: '110px', right: '80px', bottom: '110px', left: '48px' } } as const;
+// The legend stands taller with its steps open, so nothing starts behind it on a first visit.
+const FIT_FIRST_VISIT = { padding: { ...FIT_DESKTOP.padding, left: '300px' } } as const;
+// On a phone, keep nodes legible and tappable even if they don't all fit.
+const FIT_PHONE = { minZoom: 0.6 };
 
 const COARSE_POINTER = '(pointer: coarse)';
 
@@ -53,34 +59,80 @@ function useCoarsePointer() {
   );
 }
 
-function LegendLine({ kind }: { kind: CanvasLinkKind }) {
+/** Rings and meridians around a pole above the first rows of the grid. Shown in the light theme only. */
+function Graticule() {
+  const radii = Array.from({ length: 16 }, (_, ring) => (ring + 1) * 400);
+  const meridians = Array.from({ length: 24 }, (_, spoke) => (spoke * Math.PI) / 12);
   return (
-    <svg width="28" height="8" aria-hidden>
-      <line
-        x1="0"
-        y1="4"
-        x2="28"
-        y2="4"
-        strokeWidth="2.5"
-        strokeDasharray={kind === 'avoid' ? '7 5' : undefined}
-        style={{ stroke: kind === 'avoid' ? 'var(--canvas-avoid)' : 'var(--canvas-recommend)' }}
-      />
-    </svg>
+    <ViewportPortal>
+      <svg className="canvas-graticule" width="1" height="1" style={{ left: 600, top: -1400 }} aria-hidden>
+        {radii.map((radius) => (
+          <circle key={radius} r={radius} vectorEffect="non-scaling-stroke" />
+        ))}
+        {meridians.map((angle) => (
+          <line
+            key={angle}
+            x2={6400 * Math.cos(angle)}
+            y2={6400 * Math.sin(angle)}
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+    </ViewportPortal>
   );
 }
 
-function Legend() {
+function Specks() {
+  const [x, y] = useStore((state) => state.transform);
   return (
-    <Panel position="bottom-center">
-      <div className="bg-card text-card-foreground flex flex-col gap-1 rounded-lg border px-2.5 py-2 text-xs">
-        <span className="flex items-center gap-2">
-          <LegendLine kind="recommend" />
-          Goes together
-        </span>
-        <span className="flex items-center gap-2">
-          <LegendLine kind="avoid" />
-          Doesn&apos;t go together
-        </span>
+    <div
+      className="canvas-specks star-field"
+      style={{ backgroundPosition: `${String(x * 0.25)}px ${String(y * 0.25)}px` }}
+      aria-hidden
+    />
+  );
+}
+
+function Guidance({ editable, coarse, hasLinks }: { editable: boolean; coarse: boolean; hasLinks: boolean }) {
+  if (editable && !coarse) {
+    return (
+      // Open until the first line exists, then out of the way but one click from coming back.
+      <details open={!hasLinks} className="text-muted-foreground">
+        <summary className="text-foreground min-h-6 cursor-pointer rounded-xs font-medium">How to edit</summary>
+        <ol className="mt-1 flex list-inside list-decimal flex-col gap-1">
+          <li>Drag a series to move it. Click it to open it.</li>
+          <li>Drag from a star on its edge onto another series to draw a line, then pick the type.</li>
+          <li>Click a line to change or remove it.</li>
+        </ol>
+      </details>
+    );
+  }
+  const explore =
+    coarse ? 'Drag to pan, pinch to zoom, tap a series to open it.' : 'Drag to pan, scroll to zoom, click a series to open it.';
+  return (
+    <p className="text-muted-foreground">
+      {editable ? `${explore} To move series or draw lines, open this page on a computer.` : `Read only. ${explore}`}
+    </p>
+  );
+}
+
+function Legend({ editable, coarse, hasLinks }: { editable: boolean; coarse: boolean; hasLinks: boolean }) {
+  return (
+    <Panel position="bottom-left">
+      <div className="bg-card text-card-foreground flex w-64 max-w-[calc(100vw-6rem)] flex-col gap-2 rounded-lg border px-3 py-2 text-xs">
+        <div className="flex flex-col gap-1">
+          <span className="flex items-center gap-2">
+            <LinkSample kind="recommend" />
+            Goes together
+          </span>
+          <span className="flex items-center gap-2">
+            <LinkSample kind="avoid" />
+            Doesn&apos;t go together
+          </span>
+        </div>
+        <div className="border-t pt-2">
+          <Guidance editable={editable} coarse={coarse} hasLinks={hasLinks} />
+        </div>
       </div>
     </Panel>
   );
@@ -174,22 +226,35 @@ export function RecommendationCanvas({
   }, [placed, editable, onMoveNodes]);
 
   const edges = useMemo(() => {
-    const byId = new Map(nodes.map((node) => [node.id, node.position]));
-    return links.flatMap((link): LinkEdge[] => {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    return links.flatMap((link): LinkFlowEdge[] => {
       const a = byId.get(link.seriesAId);
       const b = byId.get(link.seriesBId);
       if (!a || !b) return [];
-      const sides = facingSides(a, b);
       return [
         {
           id: `${link.seriesAId}:${link.seriesBId}`,
           source: link.seriesAId,
           target: link.seriesBId,
-          sourceHandle: sides.from,
-          targetHandle: sides.to,
+          type: 'link',
+          ariaLabel: `${a.data.title} ${link.kind === 'avoid' ? "doesn't go" : 'goes'} together with ${b.data.title}`,
+          sourceHandle: 'center',
+          targetHandle: 'center',
           className: `canvas-edge-${link.kind}`,
           focusable: interactive,
           data: { link },
+          // Enter or Space on a focused line opens its menu, as a click does.
+          ...(interactive && {
+            domAttributes: {
+              onKeyDown: (event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                const rect = event.currentTarget.getBoundingClientRect();
+                const from = event.currentTarget;
+                setMenu({ type: 'edge', x: rect.x + rect.width / 2, y: rect.y + rect.height / 2, link, from });
+              },
+            },
+          }),
         },
       ];
     });
@@ -216,21 +281,23 @@ export function RecommendationCanvas({
   };
 
   return (
-    <div className="h-full min-h-96 w-full">
+    <div className="size-full">
       <ReactFlow
         className="canvas-flow"
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         connectionMode={ConnectionMode.Loose}
         nodesDraggable={interactive}
         nodesConnectable={interactive}
+        // One tab stop per series: its link inside, not also the node around it.
+        nodesFocusable={false}
         elementsSelectable={false}
         edgesFocusable={interactive}
         onlyRenderVisibleElements
         fitView
-        // On a phone, keep nodes legible and tappable even if they don't all fit.
-        fitViewOptions={coarse ? { minZoom: 0.6 } : undefined}
+        fitViewOptions={coarse ? FIT_PHONE : editable && links.length === 0 ? FIT_FIRST_VISIT : FIT_DESKTOP}
         minZoom={0.1}
         onNodesChange={(changes: NodeChange<SeriesFlowNode>[]) => {
           setNodes((current) => applyNodeChanges(changes, current));
@@ -241,20 +308,23 @@ export function RecommendationCanvas({
         onConnectEnd={interactive ? onConnectEnd : undefined}
         onEdgeClick={
           interactive ?
-            (event, edge: LinkEdge) => {
-              if (edge.data) setMenu({ type: 'edge', x: event.clientX, y: event.clientY, link: edge.data.link });
+            (event, edge: LinkFlowEdge) => {
+              const from = event.currentTarget instanceof SVGElement ? event.currentTarget : null;
+              if (edge.data) setMenu({ type: 'edge', x: event.clientX, y: event.clientY, link: edge.data.link, from });
             }
           : undefined
         }
       >
-        <Background variant={BackgroundVariant.Dots} gap={20} size={1.5} />
-        <Controls showInteractive={false} />
-        <Legend />
+        <Specks />
+        <Graticule />
+        <Controls showInteractive={false} position="bottom-right" />
+        <Legend editable={editable} coarse={coarse} hasLinks={links.length > 0} />
       </ReactFlow>
       {menu && (
         <CanvasMenu
           x={menu.x}
           y={menu.y}
+          returnFocusTo={menu.type === 'edge' ? menu.from : null}
           onDismiss={() => {
             setMenu(null);
           }}
@@ -265,6 +335,7 @@ export function RecommendationCanvas({
               chooseKind('recommend');
             }}
           >
+            <LinkSample kind="recommend" />
             Goes together
           </MenuItem>
           <MenuItem
@@ -273,6 +344,7 @@ export function RecommendationCanvas({
               chooseKind('avoid');
             }}
           >
+            <LinkSample kind="avoid" />
             Doesn&apos;t go together
           </MenuItem>
           {menu.type === 'edge' && (

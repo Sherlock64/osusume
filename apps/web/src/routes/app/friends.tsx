@@ -4,13 +4,15 @@ import { createRoute } from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { ConfirmButton } from '@/components/confirm-button';
 import { Form, SubmitButton, TextField } from '@/components/form';
-import { LoadMore, QueryFallback } from '@/components/states';
+import { PageHeader, SectionHeading } from '@/components/page-header';
+import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
 import { TextLink } from '@/components/text-link';
 import { Button } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { request, toApiError } from '@/lib/api-request';
 import { useForm, useFormRounds, type FormRounds } from '@/lib/form';
 import { useCursorList } from '@/lib/pagination';
+import { cn } from '@/lib/utils';
 import { appRoute } from '@/routes/app';
 
 const friendsKey = ['friends'] as const;
@@ -50,8 +52,8 @@ function AddFriendForm({ rounds }: { rounds: FormRounds }) {
 function AddFriend() {
   const rounds = useFormRounds();
   return (
-    <section className="mb-6 max-w-md">
-      <h2 className="mb-2 font-medium">Add a friend</h2>
+    <section className="lg:sticky lg:top-20 lg:col-start-2 lg:row-start-1 lg:self-start">
+      <SectionHeading>Add a friend</SectionHeading>
       <AddFriendForm key={rounds.formKey} rounds={rounds} />
       {rounds.message !== null && (
         <p role="status" className="text-muted-foreground mt-2 text-sm wrap-anywhere">
@@ -78,7 +80,6 @@ function FriendRow({ entry }: { entry: FriendEntry }) {
     actions = (
       <>
         <Button
-          size="sm"
           disabled={action.isPending}
           onClick={() => {
             action.mutate(() => request(api.friends.requests[':id'].accept.$post({ param })));
@@ -87,7 +88,6 @@ function FriendRow({ entry }: { entry: FriendEntry }) {
           Accept
         </Button>
         <Button
-          size="sm"
           variant="outline"
           disabled={action.isPending}
           onClick={() => {
@@ -126,10 +126,22 @@ function FriendRow({ entry }: { entry: FriendEntry }) {
   }
 
   return (
-    <li className="flex flex-wrap items-center justify-between gap-2 py-2">
-      <TextLink to="/users/$username" params={{ username }} className="min-w-0 wrap-anywhere">
-        {username}
-      </TextLink>
+    <li className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
+      <div className="flex min-w-0 items-center gap-3">
+        <span
+          aria-hidden
+          className="font-heading border-foreground/25 flex size-10 shrink-0 items-center justify-center rounded-full border text-lg uppercase"
+        >
+          {username.slice(0, 1)}
+        </span>
+        <TextLink
+          to="/users/$username"
+          params={{ username }}
+          className="min-w-0 text-base wrap-anywhere"
+        >
+          {username}
+        </TextLink>
+      </div>
       <div className="flex flex-wrap gap-2">{actions}</div>
       {action.isError && (
         <p role="alert" className="text-destructive w-full text-sm">
@@ -147,7 +159,8 @@ function FriendSection({
 }: {
   relation: FriendRelation;
   title: string;
-  empty: string;
+  /** Without this, the section only appears when it has something in it. */
+  empty?: ReactNode;
 }) {
   const { query, items } = useCursorList({
     queryKey: [...friendsKey, relation],
@@ -156,13 +169,16 @@ function FriendSection({
         api.friends.$get({ query: { relation, ...(cursor === undefined ? {} : { cursor }) } }),
       ),
   });
+  if (empty === undefined && !query.isError && items.length === 0) return null;
   return (
-    <section className="mb-6">
-      <h2 className="mb-1 font-medium">{title}</h2>
+    <section
+      className={cn(relation === 'incoming' && 'border-primary-edge bg-card rounded-lg border p-4')}
+    >
+      <SectionHeading>{title}</SectionHeading>
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
-        <p className="text-muted-foreground text-sm">{empty}</p>
+        empty
       : <ul className="divide-y">
           {items.map((entry) => (
             <FriendRow key={entry.id} entry={entry} />
@@ -177,11 +193,24 @@ function FriendSection({
 function FriendsPage() {
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Friends</h1>
-      <AddFriend />
-      <FriendSection relation="incoming" title="Requests for you" empty="No requests for you." />
-      <FriendSection relation="outgoing" title="Requests you sent" empty="No requests waiting." />
-      <FriendSection relation="friend" title="Friends" empty="No friends yet." />
+      <PageHeader title="Friends" description="Friends can see a list set to Friends." />
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-12">
+        <AddFriend />
+        <div className="flex min-w-0 flex-col gap-8 lg:col-start-1 lg:row-start-1">
+          <FriendSection relation="incoming" title="Requests for you" />
+          <FriendSection
+            relation="friend"
+            title="Friends"
+            empty={
+              <EmptyState title="No friends yet">
+                Send a request to someone by their username. Once they accept, you can see each
+                other's friends-only lists.
+              </EmptyState>
+            }
+          />
+          <FriendSection relation="outgoing" title="Requests you sent" />
+        </div>
+      </div>
     </>
   );
 }
