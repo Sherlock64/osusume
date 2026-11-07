@@ -13,7 +13,7 @@ import { lockSeries, seriesNotFound } from '../catalog/entries.ts';
 import type { Transaction } from '../db/client.ts';
 import { image, series } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
-import { ApiError } from '../lib/errors.ts';
+import { ApiError, one } from '../lib/errors.ts';
 import { revalidatedRead } from '../lib/http-cache.ts';
 import { processImage } from '../lib/image-processing.ts';
 import { imageOriginalKey, imageVariantKey, removeImageFiles } from '../lib/image-storage.ts';
@@ -135,7 +135,7 @@ export const seriesImageRoutes = createRouter()
             .select({ id: image.id })
             .from(image)
             .where(and(eq(image.seriesId, id), eq(image.isPrimary, true)));
-          const [row] = await tx
+          const row = await tx
             .insert(image)
             .values({
               id: imageId,
@@ -146,8 +146,8 @@ export const seriesImageRoutes = createRouter()
               seriesId: id,
               isPrimary: primary === undefined,
             })
-            .returning();
-          if (!row) throw new Error('image was not created');
+            .returning()
+            .then(one);
           return row;
         });
         return c.json(toSeriesImage(added), 201);
@@ -174,12 +174,12 @@ export const seriesImageRoutes = createRouter()
           .update(image)
           .set({ isPrimary: false })
           .where(and(eq(image.seriesId, id), eq(image.isPrimary, true)));
-        const [updated] = await tx
+        const updated = await tx
           .update(image)
           .set({ isPrimary: true })
           .where(eq(image.id, imageId))
-          .returning();
-        if (!updated) throw imageNotFound();
+          .returning()
+          .then(one);
         return updated;
       });
       return c.json(toSeriesImage(primary), 200);

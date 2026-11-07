@@ -12,7 +12,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
 import { listEntry, listSettings } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
-import { ApiError, isForeignKeyViolation } from '../lib/errors.ts';
+import { ApiError, isForeignKeyViolation, one } from '../lib/errors.ts';
 import { publicNoStore } from '../lib/http-cache.ts';
 import { decodeCursor } from '../lib/pagination.ts';
 import { createRouter, valid } from '../lib/router.ts';
@@ -98,7 +98,7 @@ export const listRoutes = createRouter()
       const { status, note } = c.req.valid('json');
       const noteValue = note === '' ? null : note;
       try {
-        const [row] = await c.var.deps.db
+        const row = await c.var.deps.db
           .insert(listEntry)
           .values({ userId: c.var.currentUser.id, seasonId, status, note: noteValue ?? null })
           .onConflictDoUpdate({
@@ -109,8 +109,8 @@ export const listRoutes = createRouter()
               updatedAt: new Date(),
             },
           })
-          .returning();
-        if (!row) throw new Error('list entry was not saved');
+          .returning()
+          .then(one);
         return c.json(toEntry(row), 200);
       } catch (error) {
         if (isForeignKeyViolation(error, 'list_entry_season_id_season_id_fk')) {
@@ -146,7 +146,7 @@ export const listRoutes = createRouter()
     const { visibility } = c.req.valid('json');
     // In one statement, so that two concurrent changes cannot break the slug rule. A list that
     // stays public keeps its slug; one going public gets a new one, so old links stay dead.
-    const [row] = await c.var.deps.db
+    const row = await c.var.deps.db
       .insert(listSettings)
       .values({
         userId: c.var.currentUser.id,
@@ -164,8 +164,8 @@ export const listRoutes = createRouter()
           updatedAt: new Date(),
         },
       })
-      .returning({ visibility: listSettings.visibility, publicSlug: listSettings.publicSlug });
-    if (!row) throw new Error('list settings were not saved');
+      .returning({ visibility: listSettings.visibility, publicSlug: listSettings.publicSlug })
+      .then(one);
     return c.json(row, 200);
   })
   // A member's list, without notes. Not found if missing, disabled or not visible

@@ -10,7 +10,7 @@ import {
 } from '../auth/accounts.ts';
 import type { Database, Transaction } from '../db/client.ts';
 import { emailChangeRequest, session, user } from '../db/schema.ts';
-import { ApiError } from '../lib/errors.ts';
+import { ApiError, one } from '../lib/errors.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireAdmin } from '../middleware/auth.ts';
@@ -44,8 +44,7 @@ async function setFields(
   userId: string,
   values: Partial<typeof user.$inferInsert>,
 ) {
-  const [row] = await tx.update(user).set(values).where(eq(user.id, userId)).returning();
-  if (!row) throw userNotFound();
+  const row = await tx.update(user).set(values).where(eq(user.id, userId)).returning().then(one);
   return row;
 }
 

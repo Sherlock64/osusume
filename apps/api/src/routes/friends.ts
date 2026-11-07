@@ -10,7 +10,7 @@ import { and, eq, isNull, or, sql } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
 import type { Database } from '../db/client.ts';
 import { friendship, user } from '../db/schema.ts';
-import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isUniqueViolation, one } from '../lib/errors.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
@@ -124,11 +124,11 @@ export const friendRoutes = createRouter()
       throw new ApiError(400, 'friend_request_self', 'You cannot send yourself a friend request.');
     }
     try {
-      const [row] = await db
+      const row = await db
         .insert(friendship)
         .values({ requesterId: viewerId, addresseeId: target.id })
-        .returning();
-      if (!row) throw new Error('friend request was not created');
+        .returning()
+        .then(one);
       return c.json(toEntry(row, viewerId, displayName(target)), 201);
     } catch (error) {
       if (isUniqueViolation(error, 'friendship_pair_unique')) {
@@ -154,11 +154,11 @@ export const friendRoutes = createRouter()
       )
       .returning();
     if (!row) throw requestNotFound();
-    const [requester] = await db
+    const requester = await db
       .select({ username: user.username, displayUsername: user.displayUsername })
       .from(user)
-      .where(eq(user.id, row.requesterId));
-    if (!requester) throw requestNotFound();
+      .where(eq(user.id, row.requesterId))
+      .then(one);
     return c.json(toEntry(row, viewerId, displayName(requester)), 200);
   })
   // Decline a pending request sent to the current user. The sender may ask again

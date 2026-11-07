@@ -34,3 +34,10 @@ export function isForeignKeyViolation(error: unknown, constraint?: string): bool
     (constraint === undefined || cause.constraint === constraint)
   );
 }
+
+/** The row of a query that must return one, such as an insert or an update of a row already locked. */
+export function one<Row>(rows: readonly Row[]): Row {
+  const [row] = rows;
+  if (row === undefined) throw new Error('A query that must return a row returned none');
+  return row;
+}

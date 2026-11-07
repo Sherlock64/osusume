@@ -117,12 +117,10 @@ export const meRoutes = createRouter()
         await lockEmails(tx, current.email, request.newEmail);
         await assertEmailUnused(tx, request.newEmail);
 
-        const [row] = await tx
+        await tx
           .update(user)
           .set({ email: request.newEmail, emailVerified: true })
-          .where(eq(user.id, current.id))
-          .returning();
-        if (!row) throw tokenInvalid();
+          .where(eq(user.id, current.id));
         await tx.delete(emailChangeRequest).where(eq(emailChangeRequest.id, request.id));
         // No old-address history is kept, and a reset link sent there must stop working.
         await tx

@@ -30,7 +30,7 @@ import {
 import { withoutTag } from '../catalog/proposals.ts';
 import { seriesMatchingSearch, seriesRelevance } from '../catalog/search.ts';
 import { catalogRequest, image, season, seasonTag, series, seriesTag, tag } from '../db/schema.ts';
-import { ApiError, isForeignKeyViolation, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isForeignKeyViolation, isUniqueViolation, one } from '../lib/errors.ts';
 import { revalidatedRead } from '../lib/http-cache.ts';
 import { removeImageFiles } from '../lib/image-storage.ts';
 import { lockCatalog } from '../lib/locks.ts';
@@ -297,10 +297,10 @@ export const catalogRoutes = createRouter()
   .post('/tags', requireAdmin, valid('json', createTagSchema), async (c) => {
     const { db } = c.var.deps;
     const { name } = c.req.valid('json');
-    const [created] = await refusingTakenTagName(() =>
+    const created = await refusingTakenTagName(() =>
       db.insert(tag).values({ name }).returning({ id: tag.id, name: tag.name }),
-    );
-    if (!created) throw new Error('tag was not created');
+    )
+      .then(one);
     return c.json(created, 201);
   })
   // Rename a tag

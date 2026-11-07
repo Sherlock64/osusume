@@ -17,7 +17,7 @@ import {
 } from '../catalog/proposals.ts';
 import type { Database, Transaction } from '../db/client.ts';
 import { catalogRequest, series, user } from '../db/schema.ts';
-import { ApiError } from '../lib/errors.ts';
+import { ApiError, one } from '../lib/errors.ts';
 import { lockCatalog } from '../lib/locks.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import { createRouter, valid } from '../lib/router.ts';
@@ -87,11 +87,11 @@ export const catalogRequestRoutes = createRouter()
     const created = await db.transaction(async (tx) => {
       await lockCatalog(tx);
       await assertProposalApplies(tx, proposal);
-      const [row] = await tx
+      const row = await tx
         .insert(catalogRequest)
         .values({ requesterId, kind: proposal.kind, seriesId, payload: proposal })
-        .returning();
-      if (!row) throw new Error('catalog request was not created');
+        .returning()
+        .then(one);
       const [target] = seriesId
         ? await tx.select({ title: series.title }).from(series).where(eq(series.id, seriesId))
         : [];

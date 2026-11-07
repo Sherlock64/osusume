@@ -20,7 +20,7 @@ import {
 import { inviteMail } from '../auth/emails.ts';
 import type { Transaction } from '../db/client.ts';
 import { emailBlacklist, inviteRequest, user } from '../db/schema.ts';
-import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isUniqueViolation, one } from '../lib/errors.ts';
 import { lockEmails } from '../lib/locks.ts';
 import { sendOrFail } from '../lib/mailer.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
@@ -191,12 +191,12 @@ export const inviteRoutes = createRouter()
         } else {
           values = { status: 'rejected', decidedBy: adminId };
         }
-        const [updated] = await tx
+        const updated = await tx
           .update(inviteRequest)
           .set(values)
           .where(eq(inviteRequest.id, id))
-          .returning();
-        if (!updated) throw inviteNotFound();
+          .returning()
+          .then(one);
         if (token !== undefined && updated.expiresAt) {
           await sendOrFail(
             mailer,
@@ -224,12 +224,12 @@ export const inviteRoutes = createRouter()
       if (row.status !== 'approved') {
         throw new ApiError(409, 'invite_not_revocable', 'Only an approved invite can be revoked.');
       }
-      const [updated] = await tx
+      const updated = await tx
         .update(inviteRequest)
         .set({ status: 'revoked', tokenHash: null, decidedBy: adminId })
         .where(eq(inviteRequest.id, id))
-        .returning();
-      if (!updated) throw inviteNotFound();
+        .returning()
+        .then(one);
       return toAdminInviteRequest(updated, await requesterUsernameOf(tx, updated.requesterId));
     });
     return c.json(result, 200);

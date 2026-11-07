@@ -10,7 +10,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { displayName, refusingTakenUsername, usernameTaken } from '../auth/accounts.ts';
 import { user, usernameChangeRequest } from '../db/schema.ts';
-import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isUniqueViolation, one } from '../lib/errors.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireAdmin, requireSession } from '../middleware/auth.ts';
@@ -42,11 +42,11 @@ export const usernameChangeRoutes = createRouter()
       const { db } = c.var.deps;
       const { username } = c.req.valid('json');
       try {
-        const [row] = await db
+        const row = await db
           .insert(usernameChangeRequest)
           .values({ userId: c.var.currentUser.id, requestedUsername: username })
-          .returning();
-        if (!row) throw new Error('username change request was not created');
+          .returning()
+          .then(one);
         return c.json(toRequest(row), 201);
       } catch (error) {
         if (isUniqueViolation(error, 'username_change_request_one_pending_per_user')) {
@@ -171,7 +171,7 @@ export const usernameChangeRoutes = createRouter()
               .where(eq(user.id, request.userId));
           }
 
-          const [updated] = await tx
+          const updated = await tx
             .update(usernameChangeRequest)
             .set({
               status: decision === 'approve' ? 'approved' : 'rejected',
@@ -179,13 +179,13 @@ export const usernameChangeRoutes = createRouter()
               decidedAt: new Date(),
             })
             .where(eq(usernameChangeRequest.id, id))
-            .returning();
-          if (!updated) throw requestNotFound();
-          const [owner] = await tx
+            .returning()
+            .then(one);
+          const owner = await tx
             .select({ username: user.username, displayUsername: user.displayUsername })
             .from(user)
-            .where(eq(user.id, updated.userId));
-          if (!owner) throw requestNotFound();
+            .where(eq(user.id, updated.userId))
+            .then(one);
           return toAdminRequest(updated, displayName(owner));
         }),
       );

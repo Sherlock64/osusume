@@ -8,7 +8,7 @@ import {
 import { and, asc, eq, exists, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { canvasLink, canvasPosition, image, listEntry, season, series } from '../db/schema.ts';
-import { ApiError } from '../lib/errors.ts';
+import { ApiError, one } from '../lib/errors.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 import { canView, listNotFound, loadListRefs, loadViewer } from '../social/lists.ts';
@@ -140,7 +140,7 @@ export const canvasRoutes = createRouter()
     if (eligible.size < 2) {
       throw new ApiError(404, 'series_not_on_canvas', 'Both series must be on your canvas.');
     }
-    const [row] = await db
+    const row = await db
       .insert(canvasLink)
       .values({ userId, seriesLowId: low, seriesHighId: high, kind })
       .onConflictDoUpdate({
@@ -151,8 +151,8 @@ export const canvasRoutes = createRouter()
         seriesAId: canvasLink.seriesLowId,
         seriesBId: canvasLink.seriesHighId,
         kind: canvasLink.kind,
-      });
-    if (!row) throw new Error('canvas link was not saved');
+      })
+      .then(one);
     return c.json(row, 200);
   })
   // Remove the link between two series. Nothing to remove is not an error
