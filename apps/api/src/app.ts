@@ -89,5 +89,5 @@ export function createApp(dependencies: AppDependencies) {
   return app;
 }
 
-/** The route type behind the Hono client. See `createApiClient` in @osusume/shared. */
+/** The route type behind the Hono client in apps/web/src/lib/api.ts. */
 export type AppType = ReturnType<typeof createApp>;
