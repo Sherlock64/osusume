@@ -1,12 +1,6 @@
-import { createRoute, z } from '@hono/zod-openapi';
-import {
-  accountSchema,
-  emailSentResponseSchema,
-  setupRequestSchema,
-  setupStatusResponseSchema,
-  tokenBodySchema,
-} from '@osusume/shared';
+import { setupRequestSchema, tokenBodySchema } from '@osusume/shared';
 import { and, eq, gt, like, lte } from 'drizzle-orm';
+import { z } from 'zod';
 import { hashPassword, insertAccount, refusingTakenUsername, toAccount } from '../auth/accounts.ts';
 import { firstRunSetupMail } from '../auth/emails.ts';
 import type { Database, Transaction } from '../db/client.ts';
@@ -14,7 +8,7 @@ import { user, verification } from '../db/schema.ts';
 import { ApiError } from '../lib/errors.ts';
 import { lockFirstRunSetup } from '../lib/locks.ts';
 import { sendOrFail } from '../lib/mailer.ts';
-import { conflict, createRouter, emailFailed, invalidRequest, notFound } from '../lib/router.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
 
 const SETUP_LINK_LIFETIME_MS = 24 * 60 * 60 * 1000;
@@ -36,59 +30,13 @@ async function isSetupOpen(db: Database | Transaction): Promise<boolean> {
   return existing === undefined;
 }
 
-const statusRoute = createRoute({
-  method: 'get',
-  path: '/setup/status',
-  summary: 'Whether first-run setup is still open',
-  responses: {
-    200: {
-      description: 'Setup state',
-      content: { 'application/json': { schema: setupStatusResponseSchema } },
-    },
-  },
-});
-
-const requestRoute = createRoute({
-  method: 'post',
-  path: '/setup',
-  summary: 'Start first-run setup: emails a link that creates the first admin',
-  request: {
-    body: { required: true, content: { 'application/json': { schema: setupRequestSchema } } },
-  },
-  responses: {
-    202: {
-      description: 'The verification link was sent; no account exists yet',
-      content: { 'application/json': { schema: emailSentResponseSchema } },
-    },
-    ...invalidRequest,
-    ...conflict,
-    ...emailFailed,
-  },
-});
-
-const verifyRoute = createRoute({
-  method: 'post',
-  path: '/setup/verify',
-  summary: 'Use the emailed link: creates the permanent first admin and closes setup',
-  request: {
-    body: { required: true, content: { 'application/json': { schema: tokenBodySchema } } },
-  },
-  responses: {
-    201: {
-      description: 'The first admin was created',
-      content: { 'application/json': { schema: accountSchema } },
-    },
-    ...invalidRequest,
-    ...notFound,
-    ...conflict,
-  },
-});
-
 export const setupRoutes = createRouter()
-  .openapi(statusRoute, async (c) => {
+  // Whether first-run setup is still open
+  .get('/setup/status', async (c) => {
     return c.json({ open: await isSetupOpen(c.var.deps.db) }, 200);
   })
-  .openapi(requestRoute, async (c) => {
+  // Start first-run setup: emails a link that creates the first admin
+  .post('/setup', valid('json', setupRequestSchema), async (c) => {
     const { db, auth, mailer, publicBaseUrl } = c.var.deps;
     const body = c.req.valid('json');
 
@@ -120,7 +68,8 @@ export const setupRoutes = createRouter()
     });
     return c.json({ status: 'email_sent' as const }, 202);
   })
-  .openapi(verifyRoute, async (c) => {
+  // Use the emailed link: creates the permanent first admin and closes setup
+  .post('/setup/verify', valid('json', tokenBodySchema), async (c) => {
     const { db } = c.var.deps;
     const { token } = c.req.valid('json');
 

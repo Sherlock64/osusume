@@ -1,8 +1,8 @@
+import { listStatusLabels } from '@osusume/shared';
 import { createRoute } from '@tanstack/react-router';
 import { EmptyState, ErrorState, LoadingState, LoadMore } from '@/components/states';
 import { api } from '@/lib/api';
 import { ApiError, request } from '@/lib/api-request';
-import { listStatusLabels } from '@/lib/list-status';
 import { useCursorList } from '@/lib/pagination';
 import { rootRoute } from '@/routes/root';
 

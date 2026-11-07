@@ -4,7 +4,7 @@ import type { Context } from 'hono';
 import { deleteCookie } from 'hono/cookie';
 import type { Database, Transaction } from '../db/client.ts';
 import { account, emailBlacklist, user, verification } from '../db/schema.ts';
-import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isUniqueViolation, one } from '../lib/errors.ts';
 import { lockEmails } from '../lib/locks.ts';
 import type { AppDependencies } from '../lib/context.ts';
 
@@ -70,7 +70,7 @@ export async function insertAccount(
     isFirstAdmin?: boolean;
   },
 ) {
-  const [row] = await tx
+  const row = await tx
     .insert(user)
     .values({
       name: values.username,
@@ -81,8 +81,8 @@ export async function insertAccount(
       role: values.role,
       isFirstAdmin: values.isFirstAdmin ?? false,
     })
-    .returning();
-  if (!row) throw new Error('user was not created');
+    .returning()
+    .then(one);
   await tx.insert(account).values({
     userId: row.id,
     accountId: row.id,

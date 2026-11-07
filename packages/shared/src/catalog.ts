@@ -71,21 +71,16 @@ export type Tag = z.infer<typeof tagSchema>;
 export const tagListQuerySchema = paginationQuerySchema;
 
 export const createTagSchema = z.object({ name: tagNameSchema });
-export type CreateTag = z.infer<typeof createTagSchema>;
 
 export const updateTagSchema = createTagSchema;
-export type UpdateTag = z.infer<typeof updateTagSchema>;
 
 /* Series and seasons */
 
 export const createSeriesSchema = z.object(seriesFields);
-export type CreateSeries = z.infer<typeof createSeriesSchema>;
 
 export const updateSeriesSchema = z.object(seriesFields).partial().refine(atLeastOneField, NO_FIELDS);
-export type UpdateSeries = z.infer<typeof updateSeriesSchema>;
 
 export const createSeasonSchema = z.object({ seriesId: z.uuid(), ...seasonFields });
-export type CreateSeason = z.infer<typeof createSeasonSchema>;
 
 /**
  * Sending another `seriesId` moves the season, which clears its own cover from the old catalog.
@@ -95,7 +90,6 @@ export const updateSeasonSchema = z
   .object({ seriesId: z.uuid(), ...seasonFields })
   .partial()
   .refine(atLeastOneField, NO_FIELDS);
-export type UpdateSeason = z.infer<typeof updateSeasonSchema>;
 
 export const seriesListQuerySchema = paginationQuerySchema.extend({
   /** Matches titles and alternate titles of series and of their seasons. Blank means no search. */
@@ -103,7 +97,6 @@ export const seriesListQuerySchema = paginationQuerySchema.extend({
   /** A tag id. Matches a tag on the series or on any of its seasons. */
   tag: z.uuid().optional(),
 });
-export type SeriesListQuery = z.infer<typeof seriesListQuerySchema>;
 
 /**
  * The image to show, already resolved: fetch it from /images/{id}/{size}. Null means there are
@@ -162,11 +155,6 @@ export type Season = z.infer<typeof seasonSchema>;
 /** A series with its seasons, ordered by ordinal. */
 export const seriesDetailSchema = seriesSummarySchema.extend({ seasons: z.array(seasonSchema) });
 export type SeriesDetail = z.infer<typeof seriesDetailSchema>;
-
-export const seasonDetailSchema = seasonSchema.extend({
-  series: z.object({ id: z.uuid(), title: z.string() }),
-});
-export type SeasonDetail = z.infer<typeof seasonDetailSchema>;
 
 /* Catalog requests */
 
@@ -254,7 +242,6 @@ export const catalogRequestDecisionSchema = z.discriminatedUnion('decision', [
     decisionNote: z.string().trim().min(1).max(DECISION_NOTE_MAX_LENGTH).optional(),
   }),
 ]);
-export type CatalogRequestDecision = z.infer<typeof catalogRequestDecisionSchema>;
 
 /* Images */
 
@@ -271,7 +258,6 @@ export const imageParamSchema = z.object({ id: z.uuid(), size: imageSizeSchema }
 /** An image as stored, whatever was uploaded. `width` and `height` are the `large` size's. */
 export const imageSchema = z.object({
   id: z.uuid(),
-  mime: z.string(),
   width: z.number().int(),
   height: z.number().int(),
   createdAt: timestampSchema,
@@ -286,6 +272,5 @@ export const seriesImageParamSchema = z.object({ id: z.uuid(), imageId: z.uuid()
 
 export const seriesImageSchema = imageSchema.extend({
   isPrimary: z.boolean(),
-  addedAt: timestampSchema,
 });
 export type SeriesImage = z.infer<typeof seriesImageSchema>;

@@ -1,7 +1,4 @@
-import { createRoute } from '@hono/zod-openapi';
 import {
-  canvasLinkSchema,
-  canvasResponseSchema,
   deleteCanvasLinkQuerySchema,
   putCanvasLinkSchema,
   putCanvasPositionsSchema,
@@ -11,15 +8,8 @@ import {
 import { and, asc, eq, exists, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { canvasLink, canvasPosition, image, listEntry, season, series } from '../db/schema.ts';
-import { ApiError } from '../lib/errors.ts';
-import { privateNoStore } from '../lib/http-cache.ts';
-import {
-  createRouter,
-  invalidRequest,
-  notFound,
-  sessionSecurity,
-  unauthenticated,
-} from '../lib/router.ts';
+import { ApiError, one } from '../lib/errors.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 import { canView, listNotFound, loadListRefs, loadViewer } from '../social/lists.ts';
 
@@ -103,75 +93,9 @@ function normalizePair(a: string, b: string) {
   return x < y ? ([x, y] as const) : ([y, x] as const);
 }
 
-const getCanvasRoute = createRoute({
-  method: 'get',
-  path: '/users/{username}/canvas',
-  summary: "A member's recommendation canvas. Not found if missing, disabled or not visible",
-  security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
-  request: { params: usernameParamSchema },
-  responses: {
-    200: {
-      description: 'The series on the canvas, and the links between them',
-      content: { 'application/json': { schema: canvasResponseSchema } },
-    },
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
-const putPositionsRoute = createRoute({
-  method: 'put',
-  path: '/me/canvas/positions',
-  summary: 'Place series on the canvas. Series not on the canvas are ignored',
-  security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
-  request: {
-    body: { required: true, content: { 'application/json': { schema: putCanvasPositionsSchema } } },
-  },
-  responses: {
-    204: { description: 'Saved' },
-    ...invalidRequest,
-    ...unauthenticated,
-  },
-});
-
-const putLinkRoute = createRoute({
-  method: 'put',
-  path: '/me/canvas/links',
-  summary: 'Link two series on the canvas, or change the kind of their link',
-  security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
-  request: {
-    body: { required: true, content: { 'application/json': { schema: putCanvasLinkSchema } } },
-  },
-  responses: {
-    200: {
-      description: 'The link, with the lower series id first',
-      content: { 'application/json': { schema: canvasLinkSchema } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
-const deleteLinkRoute = createRoute({
-  method: 'delete',
-  path: '/me/canvas/links',
-  summary: 'Remove the link between two series. Nothing to remove is not an error',
-  security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
-  request: { query: deleteCanvasLinkQuerySchema },
-  responses: {
-    204: { description: 'No link between them' },
-    ...invalidRequest,
-    ...unauthenticated,
-  },
-});
-
 export const canvasRoutes = createRouter()
-  .openapi(getCanvasRoute, async (c) => {
+  // A member's recommendation canvas. Not found if missing, disabled or not visible
+  .get('/users/:username/canvas', requireSession, valid('param', usernameParamSchema), async (c) => {
     const { db } = c.var.deps;
     const { username } = c.req.valid('param');
     // The same rule as the list: whoever may see it, and the same answer for everyone else.
@@ -180,7 +104,8 @@ export const canvasRoutes = createRouter()
     if (!list || !canView(viewer, list)) throw listNotFound();
     return c.json(await loadCanvas(db, list.ownerId), 200);
   })
-  .openapi(putPositionsRoute, async (c) => {
+  // Place series on the canvas. Series not on the canvas are ignored
+  .put('/me/canvas/positions', requireSession, valid('json', putCanvasPositionsSchema), async (c) => {
     const { db } = c.var.deps;
     const userId = c.var.currentUser.id;
     const { positions } = c.req.valid('json');
@@ -205,7 +130,8 @@ export const canvasRoutes = createRouter()
     }
     return c.body(null, 204);
   })
-  .openapi(putLinkRoute, async (c) => {
+  // Link two series on the canvas, or change the kind of their link
+  .put('/me/canvas/links', requireSession, valid('json', putCanvasLinkSchema), async (c) => {
     const { db } = c.var.deps;
     const userId = c.var.currentUser.id;
     const { seriesAId, seriesBId, kind } = c.req.valid('json');
@@ -214,7 +140,7 @@ export const canvasRoutes = createRouter()
     if (eligible.size < 2) {
       throw new ApiError(404, 'series_not_on_canvas', 'Both series must be on your canvas.');
     }
-    const [row] = await db
+    const row = await db
       .insert(canvasLink)
       .values({ userId, seriesLowId: low, seriesHighId: high, kind })
       .onConflictDoUpdate({
@@ -225,21 +151,27 @@ export const canvasRoutes = createRouter()
         seriesAId: canvasLink.seriesLowId,
         seriesBId: canvasLink.seriesHighId,
         kind: canvasLink.kind,
-      });
-    if (!row) throw new Error('canvas link was not saved');
+      })
+      .then(one);
     return c.json(row, 200);
   })
-  .openapi(deleteLinkRoute, async (c) => {
-    const { seriesAId, seriesBId } = c.req.valid('query');
-    const [low, high] = normalizePair(seriesAId, seriesBId);
-    await c.var.deps.db
-      .delete(canvasLink)
-      .where(
-        and(
-          eq(canvasLink.userId, c.var.currentUser.id),
-          eq(canvasLink.seriesLowId, low),
-          eq(canvasLink.seriesHighId, high),
-        ),
-      );
-    return c.body(null, 204);
-  });
+  // Remove the link between two series. Nothing to remove is not an error
+  .delete(
+    '/me/canvas/links',
+    requireSession,
+    valid('query', deleteCanvasLinkQuerySchema),
+    async (c) => {
+      const { seriesAId, seriesBId } = c.req.valid('query');
+      const [low, high] = normalizePair(seriesAId, seriesBId);
+      await c.var.deps.db
+        .delete(canvasLink)
+        .where(
+          and(
+            eq(canvasLink.userId, c.var.currentUser.id),
+            eq(canvasLink.seriesLowId, low),
+            eq(canvasLink.seriesHighId, high),
+          ),
+        );
+      return c.body(null, 204);
+    },
+  );

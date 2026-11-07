@@ -1,7 +1,6 @@
-import type { ListStatus, SeasonOfYear } from '@osusume/shared';
+import { type ListStatus, type SeasonOfYear, listStatusLabels } from '@osusume/shared';
 import { TextLink } from '@/components/text-link';
 import { formatAired } from '@/lib/catalog-format';
-import { listStatusLabels } from '@/lib/list-status';
 import { cn } from '@/lib/utils';
 
 interface ListSeriesProps {

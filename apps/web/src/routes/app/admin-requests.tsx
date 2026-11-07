@@ -4,7 +4,7 @@ import { createRoute } from '@tanstack/react-router';
 import { useState } from 'react';
 import { StatusFilter } from '@/components/admin';
 import { Form, SubmitButton, TextareaField, TextField } from '@/components/form';
-import { SeasonFields } from '@/components/season-fields';
+import { SeasonFields, SeasonList } from '@/components/season-fields';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
 import { TagPicker } from '@/components/tag-picker';
 import { TextLink } from '@/components/text-link';
@@ -86,10 +86,8 @@ function SuggestedTags({
 function NewSeriesReview({ requestId, filed }: { requestId: string; filed: NewSeriesProposal }) {
   const approve = useApprove(requestId);
   const filedSeasons = filed.seasons ?? [];
-  // Stable keys, so that removing a season keeps what was typed in the others. A key below the
-  // filed count is that filed season.
+  // A key below the filed count is that filed season.
   const [seasonKeys, setSeasonKeys] = useState(() => filedSeasons.map((_, index) => index));
-  const [nextKey, setNextKey] = useState(filedSeasons.length);
   const [tagIds, setTagIds] = useState(filed.series.tagIds ?? []);
   const [accepted, setAccepted] = useState<string[]>([]);
   const form = useForm({
@@ -130,36 +128,7 @@ function NewSeriesReview({ requestId, filed }: { requestId: string; filed: NewSe
         onChange={setAccepted}
       />
       <TagPicker label="Add tags by hand" selected={tagIds} onChange={setTagIds} />
-      {seasonKeys.map((key, index) => (
-        <fieldset key={key} className="flex min-w-0 flex-col gap-4 rounded-md border p-3">
-          <legend className="px-1 text-sm font-medium">Season</legend>
-          <SeasonFields form={form} prefix={`seasons.${String(index)}.`} defaults={filedSeasons[key]} />
-          <div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSeasonKeys((keys) => keys.filter((other) => other !== key));
-              }}
-            >
-              Remove this season
-            </Button>
-          </div>
-        </fieldset>
-      ))}
-      <div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            setSeasonKeys((keys) => [...keys, nextKey]);
-            setNextKey(nextKey + 1);
-          }}
-        >
-          Add a season
-        </Button>
-      </div>
+      <SeasonList form={form} seasonKeys={seasonKeys} onChange={setSeasonKeys} filed={filedSeasons} />
       <div>
         <SubmitButton form={form}>Approve</SubmitButton>
       </div>

@@ -1,34 +1,30 @@
 import { z } from 'zod';
 import { usernameKey, usernameSchema } from './accounts.ts';
 import { TITLE_MAX_LENGTH } from './catalog.ts';
-import { listStatusSchema, seasonOfYearSchema, visibilityTierSchema } from './enums.ts';
-import { paginatedSchema, paginationQuerySchema } from './http.ts';
+import { listStatusSchema, visibilityTierSchema } from './enums.ts';
+import { paginationQuerySchema } from './http.ts';
 
 export const LIST_NOTE_MAX_LENGTH = 10_000;
 export const COMPARE_USERS_MAX = 100;
 
 const timestampSchema = z.iso.datetime();
 
-// Postgres text cannot hold a NUL, so it has to be refused before it reaches a query.
-const hasNoNul = (value: string) => !value.includes('\0');
-const noNulMessage = 'Must not contain a NUL byte.';
-
 /**
  * The sort value in a list or friends cursor, a title or a username. A cursor is client input
  * like any other, so one that could not have been issued is refused rather than queried.
  */
-export const textCursorSortSchema = z.string().max(TITLE_MAX_LENGTH).refine(hasNoNul, noNulMessage);
+export const textCursorSortSchema = z.string().max(TITLE_MAX_LENGTH);
 
 /**
  * A username to look up. Deliberately looser than `usernameSchema`: a name that could not exist
  * gets the same not-found or "not available" answer as one that does not exist.
  */
-const usernameLookupSchema = z.string().min(1).refine(hasNoNul, noNulMessage);
+const usernameLookupSchema = z.string().min(1);
 
 export const usernameParamSchema = z.object({ username: usernameLookupSchema });
 export const seasonIdParamSchema = z.object({ seasonId: z.uuid() });
 export const listSlugParamSchema = z.object({
-  slug: z.string().min(1).refine(hasNoNul, noNulMessage),
+  slug: z.string().min(1),
 });
 
 /* Watch list */
@@ -46,83 +42,11 @@ export const putListEntrySchema = z.object({
     .string()
     .trim()
     .max(LIST_NOTE_MAX_LENGTH)
-    .refine(hasNoNul, noNulMessage)
     .nullable()
     .optional(),
 });
-export type PutListEntry = z.infer<typeof putListEntrySchema>;
-
-export const listEntrySchema = z.object({
-  seasonId: z.uuid(),
-  status: listStatusSchema,
-  note: z.string().nullable(),
-  createdAt: timestampSchema,
-  updatedAt: timestampSchema,
-});
-export type ListEntry = z.infer<typeof listEntrySchema>;
-
-/** Derived on read. `count` of `totalSeasons`, all of the series' seasons in the catalog. */
-export const seriesStatusSchema = z.object({
-  status: listStatusSchema,
-  count: z.number().int(),
-  totalSeasons: z.number().int(),
-  /** For example "Completed 2/3 seasons". */
-  label: z.string(),
-});
-export type SeriesStatus = z.infer<typeof seriesStatusSchema>;
-
-const memberListSeasonFields = {
-  seasonId: z.uuid(),
-  title: z.string(),
-  ordinal: z.number().int(),
-  year: z.number().int().nullable(),
-  seasonOfYear: seasonOfYearSchema.nullable(),
-  status: listStatusSchema,
-  /** Whether this season has the status being filtered on. Always false with no filter. */
-  matched: z.boolean(),
-};
-
-const listSeriesFields = {
-  seriesId: z.uuid(),
-  title: z.string(),
-  seriesStatus: seriesStatusSchema,
-};
-
-/** A series on the owner's own list. The only list response that holds notes. */
-export const ownListSeriesSchema = z.object({
-  ...listSeriesFields,
-  seasons: z.array(
-    z.object({
-      ...memberListSeasonFields,
-      note: z.string().nullable(),
-      createdAt: timestampSchema,
-      updatedAt: timestampSchema,
-    }),
-  ),
-});
-export type OwnListSeries = z.infer<typeof ownListSeriesSchema>;
-
-/** A series on another member's list. */
-export const memberListSeriesSchema = z.object({
-  ...listSeriesFields,
-  seasons: z.array(z.object(memberListSeasonFields)),
-});
-export type MemberListSeries = z.infer<typeof memberListSeriesSchema>;
-
-/** A series on a public list: titles and status only. */
-export const publicListSeriesSchema = z.object({
-  title: z.string(),
-  seriesStatus: seriesStatusSchema,
-  seasons: z.array(z.object({ title: z.string(), status: listStatusSchema, matched: z.boolean() })),
-});
-export type PublicListSeries = z.infer<typeof publicListSeriesSchema>;
-
-export const ownListResponseSchema = paginatedSchema(ownListSeriesSchema);
-export const memberListResponseSchema = paginatedSchema(memberListSeriesSchema);
-export const publicListResponseSchema = paginatedSchema(publicListSeriesSchema);
 
 export const putListSettingsSchema = z.object({ visibility: visibilityTierSchema });
-export type PutListSettings = z.infer<typeof putListSettingsSchema>;
 
 export const listSettingsSchema = z.object({
   visibility: visibilityTierSchema,
@@ -140,10 +64,8 @@ export type FriendRelation = z.infer<typeof friendRelationSchema>;
 export const friendListQuerySchema = paginationQuerySchema.extend({
   relation: friendRelationSchema.optional(),
 });
-export type FriendListQuery = z.infer<typeof friendListQuerySchema>;
 
 export const createFriendRequestSchema = z.object({ username: usernameSchema });
-export type CreateFriendRequest = z.infer<typeof createFriendRequestSchema>;
 
 /** An accepted friend or a pending request, as the current user sees it. */
 export const friendEntrySchema = z.object({
@@ -174,14 +96,12 @@ export function parseCompareUsernames(users: string): string[] {
 export const compareQuerySchema = z.object({
   users: z
     .string()
-    .refine(hasNoNul, noNulMessage)
     .refine((users) => parseCompareUsernames(users).length > 0, 'Name at least one username.')
     .refine(
       (users) => parseCompareUsernames(users).length <= COMPARE_USERS_MAX,
       `Name at most ${String(COMPARE_USERS_MAX)} usernames.`,
     ),
 });
-export type CompareQuery = z.infer<typeof compareQuerySchema>;
 
 export const compareRowSchema = z.object({
   seasonId: z.uuid(),

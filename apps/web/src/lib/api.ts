@@ -1,4 +1,4 @@
 import type { AppType } from '@osusume/api/app-type';
-import { createApiClient } from '@osusume/shared/client';
+import { hc } from 'hono/client';
 
-export const api = createApiClient<AppType>(window.location.origin).api.v1;
+export const api = hc<AppType>(window.location.origin).api.v1;

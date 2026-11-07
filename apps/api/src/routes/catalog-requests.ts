@@ -1,15 +1,12 @@
-import { createRoute, z } from '@hono/zod-openapi';
 import {
   adminCatalogRequestListQuerySchema,
-  adminCatalogRequestSchema,
   catalogProposalSchema,
   catalogRequestDecisionSchema,
   catalogRequestListQuerySchema,
-  catalogRequestSchema,
   idParamSchema,
-  paginatedSchema,
 } from '@osusume/shared';
 import { and, eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { displayName } from '../auth/accounts.ts';
 import { refusingTakenOrdinal } from '../catalog/entries.ts';
 import {
@@ -20,18 +17,10 @@ import {
 } from '../catalog/proposals.ts';
 import type { Database, Transaction } from '../db/client.ts';
 import { catalogRequest, series, user } from '../db/schema.ts';
-import { ApiError } from '../lib/errors.ts';
+import { ApiError, one } from '../lib/errors.ts';
 import { lockCatalog } from '../lib/locks.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
-import {
-  adminOnly,
-  conflict,
-  createRouter,
-  invalidRequest,
-  notFound,
-  sessionSecurity,
-  unauthenticated,
-} from '../lib/router.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { requireAdmin, requireSession } from '../middleware/auth.ts';
 
 const requestNotFound = () =>
@@ -88,88 +77,9 @@ async function loadAdminRequest(db: Database | Transaction, id: string) {
   return toAdminCatalogRequest(row);
 }
 
-const createRequestRoute = createRoute({
-  method: 'post',
-  path: '/catalog-requests',
-  summary: 'Propose a new series with its seasons, or a new season for an existing series',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: {
-    body: { required: true, content: { 'application/json': { schema: catalogProposalSchema } } },
-  },
-  responses: {
-    201: {
-      description: 'The request is waiting for an admin',
-      content: { 'application/json': { schema: catalogRequestSchema } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-    ...conflict,
-  },
-});
-
-const listMineRoute = createRoute({
-  method: 'get',
-  path: '/catalog-requests',
-  summary: 'The catalog requests the current user made, newest first',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { query: catalogRequestListQuerySchema },
-  responses: {
-    200: {
-      description: 'A page of catalog requests',
-      content: { 'application/json': { schema: paginatedSchema(catalogRequestSchema) } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-  },
-});
-
-const adminListRoute = createRoute({
-  method: 'get',
-  path: '/admin/catalog-requests',
-  summary: 'All catalog requests, newest first',
-  security: sessionSecurity,
-  middleware: requireAdmin,
-  request: { query: adminCatalogRequestListQuerySchema },
-  responses: {
-    200: {
-      description: 'A page of catalog requests',
-      content: { 'application/json': { schema: paginatedSchema(adminCatalogRequestSchema) } },
-    },
-    ...invalidRequest,
-    ...adminOnly,
-  },
-});
-
-const decisionRoute = createRoute({
-  method: 'post',
-  path: '/admin/catalog-requests/{id}/decision',
-  summary: 'Approve a pending request as filed or edited, creating its rows, or reject it',
-  security: sessionSecurity,
-  middleware: requireAdmin,
-  request: {
-    params: idParamSchema,
-    body: {
-      required: true,
-      content: { 'application/json': { schema: catalogRequestDecisionSchema } },
-    },
-  },
-  responses: {
-    200: {
-      description: 'The decided request',
-      content: { 'application/json': { schema: adminCatalogRequestSchema } },
-    },
-    ...invalidRequest,
-    ...adminOnly,
-    ...notFound,
-    ...conflict,
-  },
-});
-
 export const catalogRequestRoutes = createRouter()
-  .openapi(createRequestRoute, async (c) => {
+  // Propose a new series with its seasons, or a new season for an existing series
+  .post('/catalog-requests', requireSession, valid('json', catalogProposalSchema), async (c) => {
     const { db } = c.var.deps;
     const proposal = withUniqueSuggestions(c.req.valid('json'));
     const requesterId = c.var.currentUser.id;
@@ -177,11 +87,11 @@ export const catalogRequestRoutes = createRouter()
     const created = await db.transaction(async (tx) => {
       await lockCatalog(tx);
       await assertProposalApplies(tx, proposal);
-      const [row] = await tx
+      const row = await tx
         .insert(catalogRequest)
         .values({ requesterId, kind: proposal.kind, seriesId, payload: proposal })
-        .returning();
-      if (!row) throw new Error('catalog request was not created');
+        .returning()
+        .then(one);
       const [target] = seriesId
         ? await tx.select({ title: series.title }).from(series).where(eq(series.id, seriesId))
         : [];
@@ -189,123 +99,142 @@ export const catalogRequestRoutes = createRouter()
     });
     return c.json(created, 201);
   })
-  .openapi(listMineRoute, async (c) => {
-    const { db } = c.var.deps;
-    const { cursor, limit } = c.req.valid('query');
-    const page = keyset({
-      sortColumn: catalogRequest.createdAt,
-      idColumn: catalogRequest.id,
-      direction: 'desc',
-      cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
-    });
-    const rows = await db
-      .select({ request: catalogRequest, seriesTitle: series.title })
-      .from(catalogRequest)
-      .leftJoin(series, eq(catalogRequest.seriesId, series.id))
-      .where(and(eq(catalogRequest.requesterId, c.var.currentUser.id), page.where))
-      .orderBy(...page.orderBy)
-      .limit(limit + 1);
-    const { items, nextCursor } = toPage(rows, limit, (row) => ({
-      sort: row.request.createdAt,
-      id: row.request.id,
-    }));
-    return c.json(
-      { items: items.map((row) => toCatalogRequest(row.request, row.seriesTitle)), nextCursor },
-      200,
-    );
-  })
-  .openapi(adminListRoute, async (c) => {
-    const { db } = c.var.deps;
-    const { cursor, limit, status } = c.req.valid('query');
-    const page = keyset({
-      sortColumn: catalogRequest.createdAt,
-      idColumn: catalogRequest.id,
-      direction: 'desc',
-      cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
-    });
-    const rows = await db
-      .select(adminColumns)
-      .from(catalogRequest)
-      .leftJoin(series, eq(catalogRequest.seriesId, series.id))
-      .leftJoin(user, eq(catalogRequest.requesterId, user.id))
-      .where(and(status === undefined ? undefined : eq(catalogRequest.status, status), page.where))
-      .orderBy(...page.orderBy)
-      .limit(limit + 1);
-    const { items, nextCursor } = toPage(rows, limit, (row) => ({
-      sort: row.request.createdAt,
-      id: row.request.id,
-    }));
-    return c.json({ items: items.map(toAdminCatalogRequest), nextCursor }, 200);
-  })
-  .openapi(decisionRoute, async (c) => {
-    const { db } = c.var.deps;
-    const { id } = c.req.valid('param');
-    const body = c.req.valid('json');
-    const adminId = c.var.currentUser.id;
+  // The catalog requests the current user made, newest first
+  .get(
+    '/catalog-requests',
+    requireSession,
+    valid('query', catalogRequestListQuerySchema),
+    async (c) => {
+      const { db } = c.var.deps;
+      const { cursor, limit } = c.req.valid('query');
+      const page = keyset({
+        sortColumn: catalogRequest.createdAt,
+        idColumn: catalogRequest.id,
+        direction: 'desc',
+        cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
+      });
+      const rows = await db
+        .select({ request: catalogRequest, seriesTitle: series.title })
+        .from(catalogRequest)
+        .leftJoin(series, eq(catalogRequest.seriesId, series.id))
+        .where(and(eq(catalogRequest.requesterId, c.var.currentUser.id), page.where))
+        .orderBy(...page.orderBy)
+        .limit(limit + 1);
+      const { items, nextCursor } = toPage(rows, limit, (row) => ({
+        sort: row.request.createdAt,
+        id: row.request.id,
+      }));
+      return c.json(
+        { items: items.map((row) => toCatalogRequest(row.request, row.seriesTitle)), nextCursor },
+        200,
+      );
+    },
+  )
+  // All catalog requests, newest first
+  .get(
+    '/admin/catalog-requests',
+    requireAdmin,
+    valid('query', adminCatalogRequestListQuerySchema),
+    async (c) => {
+      const { db } = c.var.deps;
+      const { cursor, limit, status } = c.req.valid('query');
+      const page = keyset({
+        sortColumn: catalogRequest.createdAt,
+        idColumn: catalogRequest.id,
+        direction: 'desc',
+        cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
+      });
+      const rows = await db
+        .select(adminColumns)
+        .from(catalogRequest)
+        .leftJoin(series, eq(catalogRequest.seriesId, series.id))
+        .leftJoin(user, eq(catalogRequest.requesterId, user.id))
+        .where(and(status === undefined ? undefined : eq(catalogRequest.status, status), page.where))
+        .orderBy(...page.orderBy)
+        .limit(limit + 1);
+      const { items, nextCursor } = toPage(rows, limit, (row) => ({
+        sort: row.request.createdAt,
+        id: row.request.id,
+      }));
+      return c.json({ items: items.map(toAdminCatalogRequest), nextCursor }, 200);
+    },
+  )
+  // Approve a pending request as filed or edited, creating its rows, or reject it
+  .post(
+    '/admin/catalog-requests/:id/decision',
+    requireAdmin,
+    valid('param', idParamSchema),
+    valid('json', catalogRequestDecisionSchema),
+    async (c) => {
+      const { db } = c.var.deps;
+      const { id } = c.req.valid('param');
+      const body = c.req.valid('json');
+      const adminId = c.var.currentUser.id;
 
-    const decided = await refusingTakenOrdinal(() =>
-      db.transaction(async (tx) => {
-        await lockCatalog(tx);
-        const [row] = await tx
-          .select()
-          .from(catalogRequest)
-          .where(eq(catalogRequest.id, id))
-          .for('update');
-        if (!row) throw requestNotFound();
-        if (row.status !== 'pending') {
-          throw new ApiError(
-            409,
-            'catalog_request_not_pending',
-            'This request has already been decided.',
-          );
-        }
+      const decided = await refusingTakenOrdinal(() =>
+        db.transaction(async (tx) => {
+          await lockCatalog(tx);
+          const [row] = await tx
+            .select()
+            .from(catalogRequest)
+            .where(eq(catalogRequest.id, id))
+            .for('update');
+          if (!row) throw requestNotFound();
+          if (row.status !== 'pending') {
+            throw new ApiError(
+              409,
+              'catalog_request_not_pending',
+              'This request has already been decided.',
+            );
+          }
 
-        if (body.decision === 'reject') {
+          if (body.decision === 'reject') {
+            await tx
+              .update(catalogRequest)
+              .set({
+                status: 'rejected',
+                reviewedBy: adminId,
+                decisionNote: body.decisionNote ?? null,
+              })
+              .where(eq(catalogRequest.id, id));
+            return loadAdminRequest(tx, id);
+          }
+
+          const filed = catalogProposalSchema.parse(row.payload);
+          const edited = withUniqueSuggestions(body.proposal ?? filed);
+          if (edited.kind !== filed.kind) {
+            throw new ApiError(
+              400,
+              'proposal_kind_mismatch',
+              'An edited entry must be of the same kind as the request.',
+            );
+          }
+          if (
+            edited.kind === 'add_season' &&
+            filed.kind === 'add_season' &&
+            edited.seriesId !== filed.seriesId
+          ) {
+            throw new ApiError(
+              400,
+              'proposal_series_mismatch',
+              'A request cannot be moved to another series. Reject it instead.',
+            );
+          }
+          const proposal = await acceptSuggestions(tx, filed, edited, body.acceptSuggestedTags ?? []);
+          // Accepted tags can push an entry past a limit the edit alone was within.
+          if (!catalogProposalSchema.safeParse(proposal).success) {
+            throw new ApiError(400, 'too_many_tags', 'This entry would have too many tags.');
+          }
+          await assertProposalApplies(tx, proposal);
+          const seriesId = await applyProposal(tx, proposal);
           await tx
             .update(catalogRequest)
-            .set({
-              status: 'rejected',
-              reviewedBy: adminId,
-              decisionNote: body.decisionNote ?? null,
-            })
+            .set({ status: 'approved', reviewedBy: adminId, seriesId, payload: proposal })
             .where(eq(catalogRequest.id, id));
           return loadAdminRequest(tx, id);
-        }
-
-        const filed = catalogProposalSchema.parse(row.payload);
-        const edited = withUniqueSuggestions(body.proposal ?? filed);
-        if (edited.kind !== filed.kind) {
-          throw new ApiError(
-            400,
-            'proposal_kind_mismatch',
-            'An edited entry must be of the same kind as the request.',
-          );
-        }
-        if (
-          edited.kind === 'add_season' &&
-          filed.kind === 'add_season' &&
-          edited.seriesId !== filed.seriesId
-        ) {
-          throw new ApiError(
-            400,
-            'proposal_series_mismatch',
-            'A request cannot be moved to another series. Reject it instead.',
-          );
-        }
-        const proposal = await acceptSuggestions(tx, filed, edited, body.acceptSuggestedTags ?? []);
-        // Accepted tags can push an entry past a limit the edit alone was within.
-        if (!catalogProposalSchema.safeParse(proposal).success) {
-          throw new ApiError(400, 'too_many_tags', 'This entry would have too many tags.');
-        }
-        await assertProposalApplies(tx, proposal);
-        const seriesId = await applyProposal(tx, proposal);
-        await tx
-          .update(catalogRequest)
-          .set({ status: 'approved', reviewedBy: adminId, seriesId, payload: proposal })
-          .where(eq(catalogRequest.id, id));
-        return loadAdminRequest(tx, id);
-      }),
-    );
-    return c.json(decided, 200);
-  });
+        }),
+      );
+      return c.json(decided, 200);
+    },
+  );
 

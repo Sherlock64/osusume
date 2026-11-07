@@ -296,7 +296,6 @@ export const image = pgTable(
   {
     id: primaryId(),
     storageKey: text().notNull().unique(),
-    mime: text().notNull(),
     width: integer().notNull(),
     height: integer().notNull(),
     uploadedBy: uuid().references(() => user.id, { onDelete: 'set null' }),
@@ -306,13 +305,12 @@ export const image = pgTable(
       .references(() => series.id, { onDelete: 'cascade' }),
     /** The series' cover, and the default for its seasons. */
     isPrimary: boolean().notNull().default(false),
-    /** When it joined the catalog: the earliest remaining takes over from a removed primary. */
-    addedAt: timestampMs().notNull(),
+    /** Also when it joined the catalog: the earliest remaining takes over from a removed primary. */
     createdAt: createdAt(),
   },
   (t) => [
     uniqueIndex('image_one_primary_per_series').on(t.seriesId).where(sql`${t.isPrimary}`),
-    index('image_series_id_added_at_idx').on(t.seriesId, t.addedAt),
+    index('image_series_id_created_at_idx').on(t.seriesId, t.createdAt),
   ],
 );
 
@@ -342,8 +340,6 @@ export const series = pgTable(
     title: text().notNull(),
     altTitles: text().array().notNull().default(sql`'{}'::text[]`),
     synopsis: text(),
-    source: text(),
-    sourceId: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -378,8 +374,6 @@ export const season = pgTable(
      * The api enforces the same-series rule. Removing the image falls back to the primary.
      */
     coverImageId: uuid().references(() => image.id, { onDelete: 'set null' }),
-    source: text(),
-    sourceId: text(),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

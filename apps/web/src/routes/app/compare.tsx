@@ -1,4 +1,4 @@
-import { usernameKey, type CompareResponse, type CompareRow } from '@osusume/shared';
+import { usernameKey, type CompareResponse, type CompareRow, listStatusLabels } from '@osusume/shared';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import { createRoute } from '@tanstack/react-router';
 import { X } from 'lucide-react';
@@ -11,7 +11,6 @@ import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { addCompareNames, compareGroups, isUnavailable, removeCompareName } from '@/lib/compare';
-import { listStatusLabels } from '@/lib/list-status';
 import { useCursorList } from '@/lib/pagination';
 import { appRoute } from '@/routes/app';
 

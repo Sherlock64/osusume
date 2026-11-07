@@ -1,4 +1,4 @@
-import { LIST_NOTE_MAX_LENGTH, listStatuses, listStatusSchema } from '@osusume/shared';
+import { LIST_NOTE_MAX_LENGTH, listStatuses, listStatusSchema, listStatusLabels } from '@osusume/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { z } from 'zod';
@@ -9,7 +9,6 @@ import { NativeSelectOption } from '@/components/ui/native-select';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { useForm } from '@/lib/form';
-import { listStatusLabels } from '@/lib/list-status';
 import { ownEntriesQuery, ownListKey, type OwnEntry } from '@/lib/own-list';
 
 const entryFormSchema = z.object({

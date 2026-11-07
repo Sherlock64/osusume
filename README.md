@@ -146,7 +146,8 @@ That limiter counts per client IP on `/api/auth`. Other routes that check a pass
 10 seconds per user. Both keep their counts in memory: they reset on restart, and each api process
 counts separately, so running N instances allows N times the attempts. `POST /invite-requests` uses
 the same limiter with its own bucket, 10 requests per hour per logged-in user, admins included. It
-runs before the address is read, so a 429 says nothing about any address.
+runs before the address is read, so a 429 says nothing about any address. `POST /invites/{token}/accept`
+needs no login, so it allows 10 attempts per minute per client IP, before anything is read.
 
 Request bodies are limited to 1 MiB, by `limitRequestBody` in `apps/api/src/lib/body-size.ts`, before
 anything reads them. Only image uploads are larger, with their own limit.
@@ -156,9 +157,8 @@ Answers about an address give nothing away. A non-admin always gets the same suc
 invite: a refused address creates no row and sends nothing, and only the admin queue,
 `GET /admin/invite-requests`, shows requests. Members have no record of who they invited.
 `POST /me/email`, once the password is correct, and `POST /me/email/verify` always answer a
-non-admin "Request completed", whatever happened. So that timing or a failed send does not tell the
-two apart, a non-admin's link is sent after the response; a send failure is logged and drops the
-link. Any attempt with the correct password cancels the earlier pending link, refused or not. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
+non-admin "Request completed", whatever happened. A send failure is logged and drops the link. Response
+times are not hidden. Any attempt with the correct password cancels the earlier pending link, refused or not. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
 and rate limiting are still reported to everyone.
 
 Any invite link that cannot be used gets one identical answer from `GET /invites/{token}` and

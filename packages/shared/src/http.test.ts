@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { z } from 'zod';
 import {
   DEFAULT_PAGE_SIZE,
   MAX_PAGE_SIZE,
-  paginatedSchema,
   paginationQuerySchema,
 } from './http.ts';
 
@@ -27,11 +25,3 @@ describe('paginationQuerySchema', () => {
   );
 });
 
-describe('paginatedSchema', () => {
-  it('validates items and a nullable next cursor', () => {
-    const schema = paginatedSchema(z.object({ id: z.string() }));
-    expect(schema.safeParse({ items: [{ id: 'a' }], nextCursor: null }).success).toBe(true);
-    expect(schema.safeParse({ items: [{ id: 1 }], nextCursor: null }).success).toBe(false);
-    expect(schema.safeParse({ items: [] }).success).toBe(false);
-  });
-});

@@ -2,7 +2,7 @@ import type { Cover, SeasonOfYear, Tag } from '@osusume/shared';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import type { Database, Transaction } from '../db/client.ts';
 import { image, season, seasonTag, series, seriesTag, tag } from '../db/schema.ts';
-import { ApiError, isUniqueViolation } from '../lib/errors.ts';
+import { ApiError, isUniqueViolation, one } from '../lib/errors.ts';
 
 type Reader = Database | Transaction;
 
@@ -51,17 +51,17 @@ export async function assertTagsExist(tx: Transaction, ids: readonly string[]): 
  */
 export async function findOrCreateTag(tx: Transaction, name: string): Promise<string> {
   await tx.insert(tag).values({ name }).onConflictDoNothing();
-  const [row] = await tx
+  const row = await tx
     .select({ id: tag.id })
     .from(tag)
-    .where(sql`lower(${tag.name}) = lower(${name})`);
-  if (!row) throw new Error('tag was not found or created');
+    .where(sql`lower(${tag.name}) = lower(${name})`)
+    .then(one);
   return row.id;
 }
 
-/** Holds a series against writes for the transaction. Refuses a missing one. */
-export async function lockSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
-  const [row] = await tx.select().from(series).where(eq(series.id, id)).for('update');
+/** A series, refusing a missing one. Hold the catalog lock, which keeps it from changing. */
+export async function loadSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
+  const [row] = await tx.select().from(series).where(eq(series.id, id));
   if (!row) throw seriesNotFound();
   return row;
 }
@@ -119,15 +119,15 @@ export interface SeasonEntry {
 
 /** Inserts a series and its tags. Check the tags first. */
 export async function insertSeries(tx: Transaction, entry: SeriesEntry): Promise<string> {
-  const [row] = await tx
+  const row = await tx
     .insert(series)
     .values({
       title: entry.title,
       altTitles: entry.altTitles ?? [],
       synopsis: entry.synopsis ?? null,
     })
-    .returning({ id: series.id });
-  if (!row) throw new Error('series was not created');
+    .returning({ id: series.id })
+    .then(one);
   await setSeriesTags(tx, row.id, entry.tagIds ?? []);
   return row.id;
 }
@@ -138,7 +138,7 @@ export async function insertSeason(
   seriesId: string,
   entry: SeasonEntry,
 ): Promise<string> {
-  const [row] = await tx
+  const row = await tx
     .insert(season)
     .values({
       seriesId,
@@ -151,8 +151,8 @@ export async function insertSeason(
       synopsis: entry.synopsis ?? null,
       coverImageId: entry.coverImageId ?? null,
     })
-    .returning({ id: season.id });
-  if (!row) throw new Error('season was not created');
+    .returning({ id: season.id })
+    .then(one);
   await setSeasonTags(tx, row.id, entry.tagIds ?? []);
   return row.id;
 }

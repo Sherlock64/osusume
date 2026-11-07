@@ -799,15 +799,3 @@ describe('cache headers', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store');
   });
 });
-
-describe('the OpenAPI document', () => {
-  it('describes the catalog routes with their shared schemas', async () => {
-    const response = await t.request('GET', '/api/v1/openapi.json');
-    const document = response.body as { paths: Record<string, Record<string, unknown>> };
-    expect(Object.keys(document.paths['/series'] ?? {}).sort()).toEqual(['get', 'post']);
-    expect(Object.keys(document.paths['/series/{id}'] ?? {}).sort()).toEqual(['delete', 'get', 'patch']);
-    expect(Object.keys(document.paths['/seasons/{id}'] ?? {}).sort()).toEqual(['delete', 'get', 'patch']);
-    expect(Object.keys(document.paths['/tags/{id}'] ?? {}).sort()).toEqual(['delete', 'patch']);
-    expect(JSON.stringify(document)).not.toContain('sourceId');
-  });
-});

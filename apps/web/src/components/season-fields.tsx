@@ -1,5 +1,7 @@
 import { seasonsOfYear, type SeasonOfYear } from '@osusume/shared';
+import { useState } from 'react';
 import { SelectField, TextareaField, TextField } from '@/components/form';
+import { Button } from '@/components/ui/button';
 import { NativeSelectOption } from '@/components/ui/native-select';
 import { seasonOfYearLabels } from '@/lib/catalog-format';
 import type { FormState } from '@/lib/form';
@@ -78,6 +80,58 @@ export function SeasonFields({
         label="Synopsis (optional)"
         defaultValue={defaults?.synopsis ?? undefined}
       />
+    </>
+  );
+}
+
+/**
+ * The seasons of a proposed series, which can be added and removed. Keys are stable, so that removing
+ * a season keeps what was typed in the others. A key below `filed.length` starts from that filed season.
+ */
+export function SeasonList({
+  form,
+  seasonKeys,
+  onChange,
+  filed = [],
+}: {
+  form: FormState;
+  seasonKeys: number[];
+  onChange: (keys: number[]) => void;
+  filed?: readonly SeasonFieldDefaults[];
+}) {
+  const [nextKey, setNextKey] = useState(filed.length);
+  return (
+    <>
+      {seasonKeys.map((key, index) => (
+        <fieldset key={key} className="flex min-w-0 flex-col gap-4 rounded-md border p-3">
+          <legend className="px-1 text-sm font-medium">Season</legend>
+          <SeasonFields form={form} prefix={`seasons.${String(index)}.`} defaults={filed[key]} />
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onChange(seasonKeys.filter((other) => other !== key));
+              }}
+            >
+              Remove this season
+            </Button>
+          </div>
+        </fieldset>
+      ))}
+      <div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => {
+            onChange([...seasonKeys, nextKey]);
+            setNextKey(nextKey + 1);
+          }}
+        >
+          Add a season
+        </Button>
+      </div>
     </>
   );
 }
