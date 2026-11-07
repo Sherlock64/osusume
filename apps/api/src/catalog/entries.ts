@@ -59,9 +59,9 @@ export async function findOrCreateTag(tx: Transaction, name: string): Promise<st
   return row.id;
 }
 
-/** Holds a series against writes for the transaction. Refuses a missing one. */
-export async function lockSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
-  const [row] = await tx.select().from(series).where(eq(series.id, id)).for('update');
+/** A series, refusing a missing one. Hold the catalog lock, which keeps it from changing. */
+export async function loadSeries(tx: Transaction, id: string): Promise<typeof series.$inferSelect> {
+  const [row] = await tx.select().from(series).where(eq(series.id, id));
   if (!row) throw seriesNotFound();
   return row;
 }

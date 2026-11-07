@@ -9,7 +9,7 @@ import { and, asc, eq } from 'drizzle-orm';
 import { bodyLimit } from 'hono/body-limit';
 import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
-import { lockSeries, seriesNotFound } from '../catalog/entries.ts';
+import { loadSeries, seriesNotFound } from '../catalog/entries.ts';
 import type { Transaction } from '../db/client.ts';
 import { image, series } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
@@ -57,13 +57,12 @@ function toSeriesImage(row: ImageRow) {
   };
 }
 
-/** An image in this series' catalog, held for the transaction. */
-async function lockCatalogImage(tx: Transaction, seriesId: string, imageId: string): Promise<ImageRow> {
+/** An image in this series' catalog. Hold the catalog lock, which keeps it from changing. */
+async function loadCatalogImage(tx: Transaction, seriesId: string, imageId: string): Promise<ImageRow> {
   const [row] = await tx
     .select()
     .from(image)
-    .where(and(eq(image.id, imageId), eq(image.seriesId, seriesId)))
-    .for('update');
+    .where(and(eq(image.id, imageId), eq(image.seriesId, seriesId)));
   if (!row) throw imageNotFound();
   return row;
 }
@@ -130,7 +129,7 @@ export const seriesImageRoutes = createRouter()
         await imageStorage.put(imageOriginalKey(storageKey), processed.original);
         const added = await db.transaction(async (tx) => {
           await lockCatalog(tx);
-          await lockSeries(tx, id);
+          await loadSeries(tx, id);
           const [primary] = await tx
             .select({ id: image.id })
             .from(image)
@@ -167,8 +166,8 @@ export const seriesImageRoutes = createRouter()
       const { id, imageId } = c.req.valid('param');
       const primary = await db.transaction(async (tx) => {
         await lockCatalog(tx);
-        await lockSeries(tx, id);
-        await lockCatalogImage(tx, id, imageId);
+        await loadSeries(tx, id);
+        await loadCatalogImage(tx, id, imageId);
         // In this order: the index allows one primary at any moment, not just at commit.
         await tx
           .update(image)
@@ -195,8 +194,8 @@ export const seriesImageRoutes = createRouter()
       const { id, imageId } = c.req.valid('param');
       const storageKey = await db.transaction(async (tx) => {
         await lockCatalog(tx);
-        await lockSeries(tx, id);
-        const row = await lockCatalogImage(tx, id, imageId);
+        await loadSeries(tx, id);
+        const row = await loadCatalogImage(tx, id, imageId);
         // season.cover_image_id goes null with it, which means the series primary.
         await tx.delete(image).where(eq(image.id, imageId));
         if (row.isPrimary) {

@@ -19,7 +19,7 @@ import {
   insertSeries,
   loadSeasonDetail,
   loadSeriesDetail,
-  lockSeries,
+  loadSeries,
   refusingTakenOrdinal,
   seasonNotFound,
   seriesDateKey,
@@ -164,7 +164,7 @@ export const catalogRoutes = createRouter()
       const { tagIds, ...fields } = c.req.valid('json');
       const updated = await db.transaction(async (tx) => {
         await lockCatalog(tx);
-        await lockSeries(tx, id);
+        await loadSeries(tx, id);
         await assertTagsExist(tx, tagIds ?? []);
         await tx
           .update(series)
@@ -185,7 +185,7 @@ export const catalogRoutes = createRouter()
     try {
       storageKeys = await db.transaction(async (tx) => {
         await lockCatalog(tx);
-        const row = await lockSeries(tx, id);
+        const row = await loadSeries(tx, id);
         await tx
           .update(catalogRequest)
           .set({
@@ -228,7 +228,7 @@ export const catalogRoutes = createRouter()
     const created = await refusingTakenOrdinal(() =>
       db.transaction(async (tx) => {
         await lockCatalog(tx);
-        await lockSeries(tx, seriesId);
+        await loadSeries(tx, seriesId);
         await assertTagsExist(tx, entry.tagIds ?? []);
         await assertSeasonCover(tx, seriesId, entry.coverImageId);
         return loadSeasonDetail(tx, await insertSeason(tx, seriesId, entry));
@@ -252,7 +252,7 @@ export const catalogRoutes = createRouter()
           const [row] = await tx.select().from(season).where(eq(season.id, id)).for('update');
           if (!row) throw seasonNotFound();
           const moving = seriesId !== undefined && seriesId !== row.seriesId;
-          if (moving) await lockSeries(tx, seriesId);
+          if (moving) await loadSeries(tx, seriesId);
           await assertTagsExist(tx, tagIds ?? []);
           await assertSeasonCover(tx, moving ? seriesId : row.seriesId, fields.coverImageId);
           // List entries point at the season, so they follow it. A taken ordinal in the new series
