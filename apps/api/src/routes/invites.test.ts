@@ -3,7 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import type { Transaction } from '../db/client.ts';
 import { emailBlacklist, inviteRequest, user } from '../db/schema.ts';
 import { lockEmails } from '../lib/locks.ts';
-import { INVITE_REQUEST_LIMIT, clearAttempts } from '../lib/rate-limit.ts';
+import { INVITE_ACCEPT_LIMIT, INVITE_REQUEST_LIMIT, clearAttempts } from '../lib/rate-limit.ts';
 import { hashToken } from '../lib/tokens.ts';
 import { mailsTo, tokenFrom, waitForMail } from '../test-support/mailpit.ts';
 import {
@@ -755,5 +755,26 @@ describe('the email lock', () => {
     expect(response.status).toBe(200);
     const [row] = await t.db.select().from(user).where(eq(user.id, someone.id));
     expect(row?.email).toBe(someone.email);
+  });
+});
+
+describe('accepting an invite, rate limited', () => {
+  const attempt = (ip: string) =>
+    t.request(
+      'POST',
+      '/api/v1/invites/dead-link/accept',
+      { username: uniqueUsername('New'), password: PASSWORD },
+      { ip },
+    );
+
+  it('stops hashing for a client at its limit, and leaves other clients alone', async () => {
+    for (let count = 0; count < INVITE_ACCEPT_LIMIT.max; count += 1) {
+      expectError(await attempt('203.0.113.7'), 404, 'invite_invalid');
+    }
+    const hash = vi.spyOn((await t.auth.$context).password, 'hash');
+    expectError(await attempt('203.0.113.7'), 429, 'rate_limited');
+    expect(hash).not.toHaveBeenCalled();
+    hash.mockRestore();
+    expectError(await attempt('203.0.113.8'), 404, 'invite_invalid');
   });
 });

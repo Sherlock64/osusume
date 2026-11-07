@@ -40,7 +40,7 @@ import {
   unauthenticated,
 } from '../lib/router.ts';
 import { generateToken, hashToken } from '../lib/tokens.ts';
-import { requireAdmin, requireSessionForInviteRequest } from '../middleware/auth.ts';
+import { limitInviteAccept, requireAdmin, requireSessionForInviteRequest } from '../middleware/auth.ts';
 
 const inviteOpen = () =>
   new ApiError(409, 'invite_already_open', 'This email address already has an open invite.');
@@ -176,6 +176,7 @@ const acceptRoute = createRoute({
   method: 'post',
   path: '/invites/{token}/accept',
   summary: 'Sign up with an invite link. The email is the invited one, verified by the link',
+  middleware: limitInviteAccept,
   request: {
     params: inviteTokenParamSchema,
     body: { required: true, content: { 'application/json': { schema: acceptInviteSchema } } },
@@ -188,6 +189,7 @@ const acceptRoute = createRoute({
     ...invalidRequest,
     ...notFound,
     ...conflict,
+    ...rateLimited,
   },
 });
 

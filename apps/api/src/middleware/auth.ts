@@ -1,9 +1,11 @@
 import { type ErrorResponse, type UserRole, userRoleSchema } from '@osusume/shared';
+import type { Context } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import type { Auth } from '../auth/auth.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError } from '../lib/errors.ts';
 import {
+  INVITE_ACCEPT_LIMIT,
   INVITE_REQUEST_LIMIT,
   PASSWORD_CHECK_LIMIT,
   type RateLimitRule,
@@ -61,17 +63,19 @@ export const requireSession = createMiddleware<SessionEnv>(async (c, next) => {
   await next();
 });
 
+function tooManyAttempts(c: Context, retryAfter: number) {
+  const body: ErrorResponse = {
+    error: { code: 'rate_limited', message: 'Too many attempts. Please try again later.' },
+  };
+  return c.json(body, 429, { 'X-Retry-After': String(retryAfter) });
+}
+
 /** requireSession that also counts the request against the user's bucket, before reading the body. */
 const requireSessionLimited = (bucket: string, rule: RateLimitRule) =>
   createMiddleware<SessionEnv>(async (c, next) => {
     const currentUser = await loadCurrentUser(c.var.deps.auth, c.req.raw.headers);
     const retryAfter = consumeAttempt(`${bucket}:${currentUser.id}`, rule);
-    if (retryAfter !== null) {
-      const body: ErrorResponse = {
-        error: { code: 'rate_limited', message: 'Too many attempts. Please try again later.' },
-      };
-      return c.json(body, 429, { 'X-Retry-After': String(retryAfter) });
-    }
+    if (retryAfter !== null) return tooManyAttempts(c, retryAfter);
     c.set('currentUser', currentUser);
     await next();
     return undefined;
@@ -95,6 +99,18 @@ export const requireSessionForInviteRequest = requireSessionLimited(
   'invite-request',
   INVITE_REQUEST_LIMIT,
 );
+
+/**
+ * Limits accepting an invite per client IP, before the body is read or anything is looked up, so a
+ * 429 says nothing about the link. The proxy overwrites this header. Per process: see lib/rate-limit.ts.
+ */
+export const limitInviteAccept = createMiddleware<AppEnv>(async (c, next) => {
+  const client = c.req.header('X-Forwarded-For') ?? 'direct';
+  const retryAfter = consumeAttempt(`invite-accept:${client}`, INVITE_ACCEPT_LIMIT);
+  if (retryAfter !== null) return tooManyAttempts(c, retryAfter);
+  await next();
+  return undefined;
+});
 
 /** The same as requireSession, and the user must be an admin. */
 export const requireAdmin = createMiddleware<SessionEnv>(async (c, next) => {

@@ -17,6 +17,12 @@ export const PASSWORD_CHECK_LIMIT: RateLimitRule = { windowSeconds: 10, max: 3 }
  */
 export const INVITE_REQUEST_LIMIT: RateLimitRule = { windowSeconds: 60 * 60, max: 10 };
 
+/**
+ * Accepting an invite hashes the password before anything else and needs no login, so this keeps
+ * one client from using up the workers that hash. Enough for a person retrying a form.
+ */
+export const INVITE_ACCEPT_LIMIT: RateLimitRule = { windowSeconds: 60, max: 10 };
+
 const windows = new Map<string, { expiresAt: number; count: number }>();
 
 /** Counts an attempt. Returns null if allowed, or the seconds to wait if not. */
