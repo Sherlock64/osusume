@@ -46,36 +46,11 @@ function invalidCursor(): ApiError {
   return new ApiError(400, 'invalid_cursor', 'The pagination cursor is not valid.');
 }
 
-/**
- * The WHERE condition and ORDER BY for keyset pagination over a non-null sort
- * column with an id tie-break. Returns `where: undefined` for the first page.
- *
- * Query `limit + 1` rows and pass them to `toPage`, which uses the extra row to
- * tell whether another page exists. Timestamp columns must have millisecond
- * precision (see `timestamps` in the schema): a Date cannot hold anything finer,
- * so a coarser cursor would skip or repeat rows.
- */
-export function keyset<Sort>(options: {
-  sortColumn: AnyColumn;
-  idColumn: AnyColumn;
-  direction?: SortDirection;
-  cursor?: Cursor<Sort> | undefined;
-}): { where: SQL | undefined; orderBy: [SQL, SQL] } {
-  const { sortColumn, idColumn, direction = 'asc', cursor } = options;
-  const order = direction === 'asc' ? asc : desc;
-  const comparison = direction === 'asc' ? sql.raw('>') : sql.raw('<');
-  return {
-    where: cursor
-      ? sql`(${sortColumn}, ${idColumn}) ${comparison} (${sql.param(cursor.sort, sortColumn)}, ${sql.param(cursor.id, idColumn)})`
-      : undefined,
-    orderBy: [order(sortColumn), order(idColumn)],
-  };
-}
-
 /** One sort position of `keysetBy`: an expression that is never null, and its Postgres type. */
 export interface SortTerm {
   expression: AnyColumn | SQL;
-  type: 'integer' | 'text' | 'uuid';
+  /** Needed for a computed expression. A column already knows how to encode its value. */
+  type?: 'integer' | 'text' | 'uuid';
   direction: SortDirection;
 }
 
@@ -95,7 +70,9 @@ export function keysetBy(
   if (values === undefined) return { where: undefined, orderBy };
 
   const param = (index: number, term: SortTerm) =>
-    sql`${values[index]}::${sql.raw(term.type)}`;
+    term.type === undefined
+      ? sql.param(values[index], term.expression as AnyColumn)
+      : sql`${values[index]}::${sql.raw(term.type)}`;
   // (a after x) OR (a = x AND b after y) OR (a = x AND b = y AND c after z)
   const branches = terms.map((term, index) => {
     const comparison = term.direction === 'asc' ? sql.raw('>') : sql.raw('<');
@@ -105,6 +82,28 @@ export function keysetBy(
     return sql`(${sql.join(equalBefore)}${term.expression} ${comparison} ${param(index, term)})`;
   });
   return { where: sql`(${sql.join(branches, sql` OR `)})`, orderBy };
+}
+
+/**
+ * `keysetBy` for the common case: a sort column that is never null, then the id. Query `limit + 1`
+ * rows and pass them to `toPage`. Timestamp columns must have millisecond precision (see
+ * `timestampMs` in the schema): a Date cannot hold anything finer, so a coarser cursor would skip
+ * or repeat rows.
+ */
+export function keyset<Sort>(options: {
+  sortColumn: AnyColumn;
+  idColumn: AnyColumn;
+  direction?: SortDirection;
+  cursor?: Cursor<Sort> | undefined;
+}): { where: SQL | undefined; orderBy: SQL[] } {
+  const { sortColumn, idColumn, direction = 'asc', cursor } = options;
+  return keysetBy(
+    [
+      { expression: sortColumn, direction },
+      { expression: idColumn, direction },
+    ],
+    cursor && [cursor.sort, cursor.id],
+  );
 }
 
 /** Turns `limit + 1` fetched rows into the response envelope. */
