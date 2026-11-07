@@ -53,10 +53,22 @@ spec:
       securityContext:
         {{- include "osusume.nonRootPod" (dict "uid" 1000) | nindent 8 }}
       initContainers:
-        - name: wait-for-migrations
+        {{- if .Values.postgres.enabled }}
+        - name: wait-for-postgres
+          image: {{ .Values.postgres.image }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - sh
+            - -c
+            - until pg_isready -h {{ .Release.Name }}-postgres -U osusume -d osusume; do sleep 2; done
+          securityContext:
+            {{- include "osusume.nonRootContainer" . | nindent 12 }}
+        {{- end }}
+        # One replica with Recreate, so only one process ever migrates, before the api starts.
+        - name: migrate
           image: {{ include "osusume.apiImage" . }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command: [node, dist/db/wait-for-migrations.js]
+          command: [node, dist/db/migrate.js]
           env:
             {{- include "osusume.databaseUrlEnv" . | nindent 12 }}
           securityContext:
