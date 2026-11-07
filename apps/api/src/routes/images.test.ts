@@ -35,7 +35,6 @@ afterAll(async () => {
 
 interface ImageBody {
   id: string;
-  mime: string;
   width: number;
   height: number;
 }
@@ -73,7 +72,7 @@ describe('uploading', () => {
     ['WebP', () => solid(100, 100).webp().toBuffer()],
   ])('accepts a real %s', async (_label, make) => {
     const body = await uploaded(await make());
-    expect(body).toMatchObject({ mime: 'image/webp', width: 100, height: 100 });
+    expect(body).toMatchObject({ width: 100, height: 100 });
   });
 
   it('records the uploader and the large size, and writes every size to storage', async () => {

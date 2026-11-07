@@ -171,9 +171,9 @@ describe('migration 0007', () => {
       expect(left.rows).toEqual([{ storage_key: 'images/attached' }]);
       const columns = await client.query(
         `SELECT column_name, is_nullable FROM information_schema.columns
-         WHERE table_name = 'image' AND column_name IN ('series_id', 'added_at')`,
+         WHERE table_name = 'image' AND column_name = 'series_id'`,
       );
-      expect(columns.rows.map((column: { is_nullable: string }) => column.is_nullable)).toEqual(['NO', 'NO']);
+      expect(columns.rows.map((column: { is_nullable: string }) => column.is_nullable)).toEqual(['NO']);
     } finally {
       await client.end();
       await scratch.drop();

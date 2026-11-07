@@ -151,13 +151,11 @@ describe('removing a user', () => {
       .insert(image)
       .values({
         storageKey: `covers/${admin.id}`,
-        mime: 'image/webp',
         width: 1,
         height: 1,
         uploadedBy: admin.id,
         seriesId: entry.id,
         isPrimary: true,
-        addedAt: new Date(),
       })
       .returning();
     if (!cover) throw new Error('image was not created');

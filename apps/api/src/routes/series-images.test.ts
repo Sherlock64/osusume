@@ -136,9 +136,8 @@ describe('adding', () => {
     const series = await makeSeries();
     const response = await t.upload(series.id, png, { cookie: admin.cookie });
     expect(response.status).toBe(201);
-    const added = response.body as CatalogImage & { addedAt: string; createdAt: string; mime: string };
-    expect(added).toMatchObject({ mime: 'image/webp', width: 60, height: 90, isPrimary: true });
-    expect(added.addedAt).toEqual(expect.any(String));
+    const added = response.body as CatalogImage & { createdAt: string };
+    expect(added).toMatchObject({ width: 60, height: 90, isPrimary: true });
     expect(added.createdAt).toEqual(expect.any(String));
     expect(await catalogOf(series.id)).toMatchObject([{ id: added.id }]);
     const [row] = await t.db.select().from(image).where(eq(image.id, added.id));
@@ -289,23 +288,12 @@ describe('one primary, enforced by the database', () => {
     ).rejects.toMatchObject({ cause: { constraint: 'image_one_primary_per_series' } });
   });
 
-  it.each([
-    ['catalog', { addedAt: new Date() }, 'series_id'],
-    ['time it was added', {}, 'added_at'],
-  ])('refuses an image with no %s', async (_label, values, column) => {
-    const series = await makeSeries();
-    const row = {
-      storageKey: `images/${randomUUID()}`,
-      mime: 'image/webp',
-      width: 1,
-      height: 1,
-      ...(column === 'added_at' ? { seriesId: series.id } : {}),
-      ...values,
-    };
+  it('refuses an image with no catalog', async () => {
+    const row = { storageKey: `images/${randomUUID()}`, width: 1, height: 1 };
     await expect(
       // @ts-expect-error The types already rule this out; the database must too.
       t.db.insert(image).values(row),
-    ).rejects.toMatchObject({ cause: { code: '23502', column } });
+    ).rejects.toMatchObject({ cause: { code: '23502', column: 'series_id' } });
   });
 });
 

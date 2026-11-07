@@ -18,7 +18,7 @@ import { image, series } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError } from '../lib/errors.ts';
 import { revalidatedRead } from '../lib/http-cache.ts';
-import { STORED_IMAGE_MIME, processImage } from '../lib/image-processing.ts';
+import { processImage } from '../lib/image-processing.ts';
 import { imageOriginalKey, imageVariantKey, removeImageFiles } from '../lib/image-storage.ts';
 import { lockCatalog } from '../lib/locks.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
@@ -61,11 +61,9 @@ type ImageRow = typeof image.$inferSelect;
 function toSeriesImage(row: ImageRow) {
   return {
     id: row.id,
-    mime: row.mime,
     width: row.width,
     height: row.height,
     isPrimary: row.isPrimary,
-    addedAt: row.addedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -180,7 +178,7 @@ export const seriesImageRoutes = createRouter()
     const [found] = await db.select({ id: series.id }).from(series).where(eq(series.id, id));
     if (!found) throw seriesNotFound();
     const page = keyset({
-      sortColumn: image.addedAt,
+      sortColumn: image.createdAt,
       idColumn: image.id,
       cursor: cursor === undefined ? undefined : decodeCursor(cursor, z.coerce.date()),
     });
@@ -191,7 +189,7 @@ export const seriesImageRoutes = createRouter()
       .orderBy(...page.orderBy)
       .limit(limit + 1);
     const { items, nextCursor } = toPage(rows, limit, (row) => ({
-      sort: row.addedAt,
+      sort: row.createdAt,
       id: row.id,
     }));
     return c.json({ items: items.map(toSeriesImage), nextCursor }, 200);
@@ -227,13 +225,11 @@ export const seriesImageRoutes = createRouter()
           .values({
             id: imageId,
             storageKey,
-            mime: STORED_IMAGE_MIME,
             width: processed.width,
             height: processed.height,
             uploadedBy: c.var.currentUser.id,
             seriesId: id,
             isPrimary: primary === undefined,
-            addedAt: new Date(),
           })
           .returning();
         if (!row) throw new Error('image was not created');
@@ -281,7 +277,7 @@ export const seriesImageRoutes = createRouter()
           .select({ id: image.id })
           .from(image)
           .where(eq(image.seriesId, id))
-          .orderBy(asc(image.addedAt), asc(image.id))
+          .orderBy(asc(image.createdAt), asc(image.id))
           .limit(1);
         if (earliest) {
           await tx.update(image).set({ isPrimary: true }).where(eq(image.id, earliest.id));

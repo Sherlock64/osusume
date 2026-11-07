@@ -64,6 +64,13 @@
       "when": 1794001952181,
       "tag": "0008_canvas",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1794069835135,
+      "tag": "0009_drop_unused_columns",
+      "breakpoints": true
     }
   ]
 }

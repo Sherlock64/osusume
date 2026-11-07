@@ -271,7 +271,6 @@ export const imageParamSchema = z.object({ id: z.uuid(), size: imageSizeSchema }
 /** An image as stored, whatever was uploaded. `width` and `height` are the `large` size's. */
 export const imageSchema = z.object({
   id: z.uuid(),
-  mime: z.string(),
   width: z.number().int(),
   height: z.number().int(),
   createdAt: timestampSchema,
@@ -286,6 +285,5 @@ export const seriesImageParamSchema = z.object({ id: z.uuid(), imageId: z.uuid()
 
 export const seriesImageSchema = imageSchema.extend({
   isPrimary: z.boolean(),
-  addedAt: timestampSchema,
 });
 export type SeriesImage = z.infer<typeof seriesImageSchema>;

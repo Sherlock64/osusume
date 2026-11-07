@@ -42,7 +42,7 @@ export const imageRoutes = createRouter()
     const { db, imageStorage } = c.var.deps;
     const { id, size } = c.req.valid('param');
     const [row] = await db
-      .select({ storageKey: image.storageKey, mime: image.mime })
+      .select({ storageKey: image.storageKey })
       .from(image)
       .where(eq(image.id, id));
     if (!row) throw imageNotFound();
@@ -58,7 +58,7 @@ export const imageRoutes = createRouter()
       throw imageNotFound();
     }
     return c.body(Buffer.from(bytes), 200, {
-      'Content-Type': row.mime,
+      'Content-Type': STORED_IMAGE_MIME,
       'Content-Length': String(bytes.byteLength),
       'X-Content-Type-Options': 'nosniff',
       ETag: tag,
