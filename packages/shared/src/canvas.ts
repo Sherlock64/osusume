@@ -8,6 +8,10 @@ export type CanvasLinkKind = z.infer<typeof canvasLinkKindSchema>;
 
 export const CANVAS_POSITIONS_MAX = 1000;
 
+/** Far beyond any real drag. Past about 1e18, the layout's grid loop in the web app never ends. */
+export const CANVAS_COORDINATE_MAX = 1_000_000;
+const coordinateSchema = z.number().min(-CANVAS_COORDINATE_MAX).max(CANVAS_COORDINATE_MAX);
+
 /** A series on the canvas. `x` and `y` are null until the owner has placed it. */
 export const canvasNodeSchema = z.object({
   seriesId: z.uuid(),
@@ -35,7 +39,7 @@ export type CanvasResponse = z.infer<typeof canvasResponseSchema>;
 
 export const putCanvasPositionsSchema = z.object({
   positions: z
-    .array(z.object({ seriesId: z.uuid(), x: z.number(), y: z.number() }))
+    .array(z.object({ seriesId: z.uuid(), x: coordinateSchema, y: coordinateSchema }))
     .min(1)
     .max(CANVAS_POSITIONS_MAX),
 });
