@@ -136,7 +136,7 @@ describe('uploading', () => {
 
   it('refuses a body that is not multipart', async () => {
     const response = await t.request('POST', `/api/v1/series/${catalogId}/images`, { file: 'nope' }, { cookie: admin.cookie });
-    expectError(response, 415, 'bad_request');
+    expectError(response, 400, 'validation_error');
   });
 
   it('drops metadata such as location from what it stores', async () => {

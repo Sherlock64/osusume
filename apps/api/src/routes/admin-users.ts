@@ -1,6 +1,6 @@
-import { createRoute, z } from '@hono/zod-openapi';
-import { adminUserSchema, idParamSchema, paginatedSchema, paginationQuerySchema } from '@osusume/shared';
+import { idParamSchema, paginationQuerySchema } from '@osusume/shared';
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import {
   clearSessionCookie,
   deletePasswordResetTokens,
@@ -12,13 +12,7 @@ import type { Database, Transaction } from '../db/client.ts';
 import { emailChangeRequest, session, user } from '../db/schema.ts';
 import { ApiError } from '../lib/errors.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
-import {
-  adminOnly,
-  createRouter,
-  invalidRequest,
-  notFound,
-  sessionSecurity,
-} from '../lib/router.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { requireAdmin } from '../middleware/auth.ts';
 
 function toAdminUser(row: typeof user.$inferSelect) {
@@ -55,62 +49,9 @@ async function setFields(
   return row;
 }
 
-function actionRoute<Action extends string>(action: Action, summary: string) {
-  return createRoute({
-    method: 'post',
-    path: `/admin/users/{id}/${action}` as const,
-    summary,
-    security: sessionSecurity,
-    middleware: requireAdmin,
-    request: { params: idParamSchema },
-    responses: {
-      200: {
-        description: 'The updated user',
-        content: { 'application/json': { schema: adminUserSchema } },
-      },
-      ...invalidRequest,
-      ...adminOnly,
-      ...notFound,
-    },
-  });
-}
-
-function removalRoute<Action extends string>(action: Action, summary: string) {
-  return createRoute({
-    method: 'post',
-    path: `/admin/users/{id}/${action}` as const,
-    summary,
-    security: sessionSecurity,
-    middleware: requireAdmin,
-    request: { params: idParamSchema },
-    responses: {
-      204: { description: 'The account was deleted' },
-      ...invalidRequest,
-      ...adminOnly,
-      ...notFound,
-    },
-  });
-}
-
-const listRoute = createRoute({
-  method: 'get',
-  path: '/admin/users',
-  summary: 'All accounts, oldest first',
-  security: sessionSecurity,
-  middleware: requireAdmin,
-  request: { query: paginationQuerySchema },
-  responses: {
-    200: {
-      description: 'A page of users',
-      content: { 'application/json': { schema: paginatedSchema(adminUserSchema) } },
-    },
-    ...invalidRequest,
-    ...adminOnly,
-  },
-});
-
 export const adminUserRoutes = createRouter()
-  .openapi(listRoute, async (c) => {
+  // All accounts, oldest first
+  .get('/admin/users', requireAdmin, valid('query', paginationQuerySchema), async (c) => {
     const { cursor, limit } = c.req.valid('query');
     const page = keyset({
       sortColumn: user.createdAt,
@@ -129,50 +70,53 @@ export const adminUserRoutes = createRouter()
     }));
     return c.json({ items: items.map(toAdminUser), nextCursor }, 200);
   })
-  .openapi(actionRoute('promote', 'Make a user an admin'), async (c) => {
+  // Make a user an admin
+  .post('/admin/users/:id/promote', requireAdmin, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     const updated = await changeUser(c.var.deps.db, id, (tx, target) =>
       setFields(tx, target.id, { role: 'admin' }),
     );
     return c.json(updated, 200);
   })
-  .openapi(actionRoute('demote', 'Make an admin a member'), async (c) => {
+  // Make an admin a member
+  .post('/admin/users/:id/demote', requireAdmin, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     const updated = await changeUser(c.var.deps.db, id, (tx, target) =>
       setFields(tx, target.id, { role: 'member' }),
     );
     return c.json(updated, 200);
   })
-  .openapi(
-    actionRoute('disable', 'Disable a user: signed out immediately and unable to log in'),
-    async (c) => {
-      const { id } = c.req.valid('param');
-      const updated = await changeUser(c.var.deps.db, id, async (tx, target) => {
-        const row = await setFields(tx, target.id, { disabledAt: target.disabledAt ?? new Date() });
-        await tx.delete(session).where(eq(session.userId, target.id));
-        // Nothing outstanding may act for the account while it is disabled.
-        await deletePasswordResetTokens(tx, target.id);
-        await tx.delete(emailChangeRequest).where(eq(emailChangeRequest.userId, target.id));
-        return row;
-      });
-      if (id === c.var.currentUser.id) await clearSessionCookie(c, c.var.deps.auth);
-      return c.json(updated, 200);
-    },
-  )
-  .openapi(actionRoute('enable', 'Reverse a disable'), async (c) => {
+  // Disable a user: signed out immediately and unable to log in
+  .post('/admin/users/:id/disable', requireAdmin, valid('param', idParamSchema), async (c) => {
+    const { id } = c.req.valid('param');
+    const updated = await changeUser(c.var.deps.db, id, async (tx, target) => {
+      const row = await setFields(tx, target.id, { disabledAt: target.disabledAt ?? new Date() });
+      await tx.delete(session).where(eq(session.userId, target.id));
+      // Nothing outstanding may act for the account while it is disabled.
+      await deletePasswordResetTokens(tx, target.id);
+      await tx.delete(emailChangeRequest).where(eq(emailChangeRequest.userId, target.id));
+      return row;
+    });
+    if (id === c.var.currentUser.id) await clearSessionCookie(c, c.var.deps.auth);
+    return c.json(updated, 200);
+  })
+  // Reverse a disable
+  .post('/admin/users/:id/enable', requireAdmin, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     const updated = await changeUser(c.var.deps.db, id, (tx, target) =>
       setFields(tx, target.id, { disabledAt: null }),
     );
     return c.json(updated, 200);
   })
-  .openapi(removalRoute('remove', 'Remove a user permanently. The email can be invited again'), async (c) => {
+  // Remove a user permanently. The email can be invited again
+  .post('/admin/users/:id/remove', requireAdmin, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     await removeUser(c.var.deps.db, id);
     if (id === c.var.currentUser.id) await clearSessionCookie(c, c.var.deps.auth);
     return c.body(null, 204);
   })
-  .openapi(removalRoute('ban', 'Remove a user and blacklist their current email'), async (c) => {
+  // Remove a user and blacklist their current email
+  .post('/admin/users/:id/ban', requireAdmin, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     await removeUser(c.var.deps.db, id, { bannedBy: c.var.currentUser.id });
     if (id === c.var.currentUser.id) await clearSessionCookie(c, c.var.deps.auth);

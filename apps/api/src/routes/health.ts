@@ -1,38 +1,11 @@
-import { OpenAPIHono, createRoute } from '@hono/zod-openapi';
-import { livenessResponseSchema, readinessResponseSchema } from '@osusume/shared';
-
-const livenessRoute = createRoute({
-  method: 'get',
-  path: '/health',
-  summary: 'Liveness: the process is serving requests',
-  responses: {
-    200: {
-      description: 'The api is alive',
-      content: { 'application/json': { schema: livenessResponseSchema } },
-    },
-  },
-});
-
-const readinessRoute = createRoute({
-  method: 'get',
-  path: '/health/ready',
-  summary: 'Readiness: the api can reach its database',
-  responses: {
-    200: {
-      description: 'The api can serve traffic',
-      content: { 'application/json': { schema: readinessResponseSchema } },
-    },
-    503: {
-      description: 'The database is unreachable',
-      content: { 'application/json': { schema: readinessResponseSchema } },
-    },
-  },
-});
+import { Hono } from 'hono';
 
 export function healthRoutes(checkDatabase: () => Promise<void>) {
-  return new OpenAPIHono()
-    .openapi(livenessRoute, (c) => c.json({ status: 'ok' as const }, 200))
-    .openapi(readinessRoute, async (c) => {
+  return new Hono()
+    // Liveness: the process is serving requests
+    .get('/health', (c) => c.json({ status: 'ok' as const }, 200))
+    // Readiness: the api can reach its database
+    .get('/health/ready', async (c) => {
       try {
         await checkDatabase();
         return c.json({ status: 'ready' as const }, 200);

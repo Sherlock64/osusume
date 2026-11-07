@@ -1,5 +1,5 @@
-import { OpenAPIHono } from '@hono/zod-openapi';
 import type { ErrorResponse } from '@osusume/shared';
+import { Hono } from 'hono';
 import { HTTPException } from 'hono/http-exception';
 import { exposedAuthEndpoints } from './auth/auth.ts';
 import { limitRequestBody } from './lib/body-size.ts';
@@ -27,7 +27,7 @@ export type { AppDependencies } from './lib/context.ts';
 const AUTH_BASE_PATH = '/api/auth';
 
 export function createApp(dependencies: AppDependencies) {
-  const v1 = new OpenAPIHono<AppEnv>();
+  const v1 = new Hono<AppEnv>();
   v1.use(privateByDefault);
   v1.use(rejectNulBytes);
   v1.use(async (c, next) => {
@@ -51,21 +51,7 @@ export function createApp(dependencies: AppDependencies) {
     .route('/', friendRoutes)
     .route('/', compareRoutes);
 
-  routes.openAPIRegistry.registerComponent('securitySchemes', 'session', {
-    type: 'apiKey',
-    in: 'cookie',
-    name: 'better-auth.session_token',
-    description:
-      'The session cookie Better Auth sets at /api/auth/sign-in/username. Over HTTPS its name has the __Secure- prefix.',
-  });
-
-  routes.doc('/openapi.json', {
-    openapi: '3.0.0',
-    info: { title: 'Osusume API', version: '1.0.0' },
-    servers: [{ url: '/api/v1' }],
-  });
-
-  const root = new OpenAPIHono();
+  const root = new Hono();
   root.use(limitRequestBody);
   const app = root.route('/api/v1', routes);
 

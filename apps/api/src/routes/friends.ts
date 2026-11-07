@@ -1,11 +1,8 @@
-import { createRoute } from '@hono/zod-openapi';
 import {
   type FriendRelation,
   createFriendRequestSchema,
-  friendEntrySchema,
   friendListQuerySchema,
   idParamSchema,
-  paginatedSchema,
   textCursorSortSchema,
   usernameKey,
 } from '@osusume/shared';
@@ -15,14 +12,7 @@ import type { Database } from '../db/client.ts';
 import { friendship, user } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
-import {
-  conflict,
-  createRouter,
-  invalidRequest,
-  notFound,
-  sessionSecurity,
-  unauthenticated,
-} from '../lib/router.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 
 type FriendshipRow = typeof friendship.$inferSelect;
@@ -72,112 +62,9 @@ async function loadPair(db: Database, a: string, b: string) {
   return row;
 }
 
-const listRoute = createRoute({
-  method: 'get',
-  path: '/friends',
-  summary: 'Accepted friends and pending requests either way, by username',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { query: friendListQuerySchema },
-  responses: {
-    200: {
-      description: 'A page of friends and requests',
-      content: { 'application/json': { schema: paginatedSchema(friendEntrySchema) } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-  },
-});
-
-const createRequestRoute = createRoute({
-  method: 'post',
-  path: '/friends/requests',
-  summary: 'Send a friend request to an exact username, ignoring case',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: {
-    body: {
-      required: true,
-      content: { 'application/json': { schema: createFriendRequestSchema } },
-    },
-  },
-  responses: {
-    201: {
-      description: 'The request is waiting for the other member',
-      content: { 'application/json': { schema: friendEntrySchema } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-    ...conflict,
-  },
-});
-
-const acceptRoute = createRoute({
-  method: 'post',
-  path: '/friends/requests/{id}/accept',
-  summary: 'Accept a pending request sent to the current user',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { params: idParamSchema },
-  responses: {
-    200: {
-      description: 'The new friend',
-      content: { 'application/json': { schema: friendEntrySchema } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
-const declineRoute = createRoute({
-  method: 'post',
-  path: '/friends/requests/{id}/decline',
-  summary: 'Decline a pending request sent to the current user. The sender may ask again',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { params: idParamSchema },
-  responses: {
-    204: { description: 'Declined' },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
-const cancelRoute = createRoute({
-  method: 'delete',
-  path: '/friends/requests/{id}',
-  summary: 'Cancel a pending request the current user sent',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { params: idParamSchema },
-  responses: {
-    204: { description: 'Cancelled' },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
-const unfriendRoute = createRoute({
-  method: 'delete',
-  path: '/friends/{id}',
-  summary: 'End a friendship, from either side',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { params: idParamSchema },
-  responses: {
-    204: { description: 'No longer friends' },
-    ...invalidRequest,
-    ...unauthenticated,
-    ...notFound,
-  },
-});
-
 export const friendRoutes = createRouter()
-  .openapi(listRoute, async (c) => {
+  // Accepted friends and pending requests either way, by username
+  .get('/friends', requireSession, valid('query', friendListQuerySchema), async (c) => {
     const { db } = c.var.deps;
     const viewerId = c.var.currentUser.id;
     const { cursor, limit, relation } = c.req.valid('query');
@@ -223,7 +110,8 @@ export const friendRoutes = createRouter()
       200,
     );
   })
-  .openapi(createRequestRoute, async (c) => {
+  // Send a friend request to an exact username, ignoring case
+  .post('/friends/requests', requireSession, valid('json', createFriendRequestSchema), async (c) => {
     const { db } = c.var.deps;
     const viewerId = c.var.currentUser.id;
     const { username } = c.req.valid('json');
@@ -249,7 +137,8 @@ export const friendRoutes = createRouter()
       throw error;
     }
   })
-  .openapi(acceptRoute, async (c) => {
+  // Accept a pending request sent to the current user
+  .post('/friends/requests/:id/accept', requireSession, valid('param', idParamSchema), async (c) => {
     const { db } = c.var.deps;
     const viewerId = c.var.currentUser.id;
     const { id } = c.req.valid('param');
@@ -272,7 +161,8 @@ export const friendRoutes = createRouter()
     if (!requester) throw requestNotFound();
     return c.json(toEntry(row, viewerId, displayName(requester)), 200);
   })
-  .openapi(declineRoute, async (c) => {
+  // Decline a pending request sent to the current user. The sender may ask again
+  .post('/friends/requests/:id/decline', requireSession, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     const deleted = await c.var.deps.db
       .delete(friendship)
@@ -287,7 +177,8 @@ export const friendRoutes = createRouter()
     if (deleted.length === 0) throw requestNotFound();
     return c.body(null, 204);
   })
-  .openapi(cancelRoute, async (c) => {
+  // Cancel a pending request the current user sent
+  .delete('/friends/requests/:id', requireSession, valid('param', idParamSchema), async (c) => {
     const { id } = c.req.valid('param');
     const deleted = await c.var.deps.db
       .delete(friendship)
@@ -302,7 +193,8 @@ export const friendRoutes = createRouter()
     if (deleted.length === 0) throw requestNotFound();
     return c.body(null, 204);
   })
-  .openapi(unfriendRoute, async (c) => {
+  // End a friendship, from either side
+  .delete('/friends/:id', requireSession, valid('param', idParamSchema), async (c) => {
     const viewerId = c.var.currentUser.id;
     const { id } = c.req.valid('param');
     const deleted = await c.var.deps.db

@@ -1,35 +1,17 @@
-import { createRoute } from '@hono/zod-openapi';
 import {
   type CompareRow,
   compareQuerySchema,
-  compareResponseSchema,
   parseCompareUsernames,
   usernameKey,
 } from '@osusume/shared';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { listEntry, season, series } from '../db/schema.ts';
-import { createRouter, invalidRequest, sessionSecurity, unauthenticated } from '../lib/router.ts';
+import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 import { canView, loadListRefs, loadViewer } from '../social/lists.ts';
 
-const compareRoute = createRoute({
-  method: 'get',
-  path: '/compare',
-  summary: 'Compare the lists of exactly the usernames given, comma separated',
-  security: sessionSecurity,
-  middleware: requireSession,
-  request: { query: compareQuerySchema },
-  responses: {
-    200: {
-      description: 'Who is available and, with at least two, the comparison',
-      content: { 'application/json': { schema: compareResponseSchema } },
-    },
-    ...invalidRequest,
-    ...unauthenticated,
-  },
-});
-
-export const compareRoutes = createRouter().openapi(compareRoute, async (c) => {
+// Compare the lists of exactly the usernames given, comma separated
+export const compareRoutes = createRouter().get('/compare', requireSession, valid('query', compareQuerySchema), async (c) => {
   const { db } = c.var.deps;
   const usernames = parseCompareUsernames(c.req.valid('query').users);
   const lists = await loadListRefs(db, usernames);
