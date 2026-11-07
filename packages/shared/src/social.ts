@@ -9,26 +9,22 @@ export const COMPARE_USERS_MAX = 100;
 
 const timestampSchema = z.iso.datetime();
 
-// Postgres text cannot hold a NUL, so it has to be refused before it reaches a query.
-const hasNoNul = (value: string) => !value.includes('\0');
-const noNulMessage = 'Must not contain a NUL byte.';
-
 /**
  * The sort value in a list or friends cursor, a title or a username. A cursor is client input
  * like any other, so one that could not have been issued is refused rather than queried.
  */
-export const textCursorSortSchema = z.string().max(TITLE_MAX_LENGTH).refine(hasNoNul, noNulMessage);
+export const textCursorSortSchema = z.string().max(TITLE_MAX_LENGTH);
 
 /**
  * A username to look up. Deliberately looser than `usernameSchema`: a name that could not exist
  * gets the same not-found or "not available" answer as one that does not exist.
  */
-const usernameLookupSchema = z.string().min(1).refine(hasNoNul, noNulMessage);
+const usernameLookupSchema = z.string().min(1);
 
 export const usernameParamSchema = z.object({ username: usernameLookupSchema });
 export const seasonIdParamSchema = z.object({ seasonId: z.uuid() });
 export const listSlugParamSchema = z.object({
-  slug: z.string().min(1).refine(hasNoNul, noNulMessage),
+  slug: z.string().min(1),
 });
 
 /* Watch list */
@@ -46,7 +42,6 @@ export const putListEntrySchema = z.object({
     .string()
     .trim()
     .max(LIST_NOTE_MAX_LENGTH)
-    .refine(hasNoNul, noNulMessage)
     .nullable()
     .optional(),
 });
@@ -174,7 +169,6 @@ export function parseCompareUsernames(users: string): string[] {
 export const compareQuerySchema = z.object({
   users: z
     .string()
-    .refine(hasNoNul, noNulMessage)
     .refine((users) => parseCompareUsernames(users).length > 0, 'Name at least one username.')
     .refine(
       (users) => parseCompareUsernames(users).length <= COMPARE_USERS_MAX,
