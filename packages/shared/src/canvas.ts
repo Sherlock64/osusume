@@ -43,7 +43,6 @@ export const putCanvasPositionsSchema = z.object({
     .min(1)
     .max(CANVAS_POSITIONS_MAX),
 });
-export type PutCanvasPositions = z.infer<typeof putCanvasPositionsSchema>;
 
 export const putCanvasLinkSchema = canvasLinkSchema;
 

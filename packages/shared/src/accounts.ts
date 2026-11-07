@@ -35,9 +35,6 @@ export const tokenSchema = z.string().min(1).max(512);
 
 export const idParamSchema = z.object({ id: z.uuid() });
 
-export const emailSentResponseSchema = z.object({ status: z.literal('email_sent') });
-export type EmailSentResponse = z.infer<typeof emailSentResponseSchema>;
-
 const timestampSchema = z.iso.datetime();
 
 /** `mine` is the only scope outside the admin lists, so it can only be "true" or left out. */
@@ -57,32 +54,17 @@ export type Account = z.infer<typeof accountSchema>;
 
 /* First-run setup */
 
-export const setupStatusResponseSchema = z.object({ open: z.boolean() });
-export type SetupStatusResponse = z.infer<typeof setupStatusResponseSchema>;
-
 export const setupRequestSchema = z.object({
   username: usernameSchema,
   email: emailSchema,
   password: passwordSchema,
 });
-export type SetupRequest = z.infer<typeof setupRequestSchema>;
 
 export const tokenBodySchema = z.object({ token: tokenSchema });
-export type TokenBody = z.infer<typeof tokenBodySchema>;
 
 /* Invites */
 
 export const createInviteRequestSchema = z.object({ email: emailSchema });
-export type CreateInviteRequest = z.infer<typeof createInviteRequestSchema>;
-
-/**
- * The answer to requesting an invite, whether or not the address could be invited. Nothing in it
- * may differ between the two, so it holds no id or status of the request.
- */
-export const inviteRequestSentResponseSchema = z.object({
-  message: z.literal('Request sent to the admins'),
-});
-export type InviteRequestSentResponse = z.infer<typeof inviteRequestSentResponseSchema>;
 
 export const adminInviteRequestListQuerySchema = paginationQuerySchema.extend({
   status: inviteRequestStatusSchema.optional(),
@@ -113,28 +95,18 @@ export const invitePreviewSchema = z.object({
 export type InvitePreview = z.infer<typeof invitePreviewSchema>;
 
 export const decisionSchema = z.object({ decision: z.enum(['approve', 'reject']) });
-export type Decision = z.infer<typeof decisionSchema>;
 
 export const acceptInviteSchema = z.object({
   username: usernameSchema,
   password: passwordSchema,
 });
-export type AcceptInvite = z.infer<typeof acceptInviteSchema>;
 
 /* Own account */
-
-/**
- * All a non-admin hears from starting or finishing an email change, once the password is correct:
- * nothing in it says whether the change went ahead.
- */
-export const requestCompletedResponseSchema = z.object({ message: z.literal('Request completed') });
-export type RequestCompletedResponse = z.infer<typeof requestCompletedResponseSchema>;
 
 export const changeEmailSchema = z.object({
   currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
   newEmail: emailSchema,
 });
-export type ChangeEmail = z.infer<typeof changeEmailSchema>;
 
 export const deleteAccountSchema = z.object({
   currentPassword: z.string().min(1).max(PASSWORD_MAX_LENGTH),
@@ -144,7 +116,6 @@ export type DeleteAccount = z.infer<typeof deleteAccountSchema>;
 /* Username changes */
 
 export const createUsernameChangeRequestSchema = z.object({ username: usernameSchema });
-export type CreateUsernameChangeRequest = z.infer<typeof createUsernameChangeRequestSchema>;
 
 export const usernameChangeRequestListQuerySchema = mineQuerySchema;
 
@@ -155,7 +126,6 @@ export const usernameChangeRequestSchema = z.object({
   decidedAt: timestampSchema.nullable(),
   createdAt: timestampSchema,
 });
-export type UsernameChangeRequest = z.infer<typeof usernameChangeRequestSchema>;
 
 export const adminUsernameChangeRequestListQuerySchema = paginationQuerySchema.extend({
   status: usernameChangeRequestStatusSchema.optional(),
