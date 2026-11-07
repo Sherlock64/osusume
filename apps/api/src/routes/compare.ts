@@ -8,7 +8,6 @@ import {
 } from '@osusume/shared';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { listEntry, season, series } from '../db/schema.ts';
-import { privateNoStore } from '../lib/http-cache.ts';
 import { createRouter, invalidRequest, sessionSecurity, unauthenticated } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 import { canView, loadListRefs, loadViewer } from '../social/lists.ts';
@@ -18,7 +17,7 @@ const compareRoute = createRoute({
   path: '/compare',
   summary: 'Compare the lists of exactly the usernames given, comma separated',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { query: compareQuerySchema },
   responses: {
     200: {

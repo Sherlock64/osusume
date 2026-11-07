@@ -12,7 +12,6 @@ import { and, asc, eq, exists, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
 import { canvasLink, canvasPosition, image, listEntry, season, series } from '../db/schema.ts';
 import { ApiError } from '../lib/errors.ts';
-import { privateNoStore } from '../lib/http-cache.ts';
 import {
   createRouter,
   invalidRequest,
@@ -108,7 +107,7 @@ const getCanvasRoute = createRoute({
   path: '/users/{username}/canvas',
   summary: "A member's recommendation canvas. Not found if missing, disabled or not visible",
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: usernameParamSchema },
   responses: {
     200: {
@@ -125,7 +124,7 @@ const putPositionsRoute = createRoute({
   path: '/me/canvas/positions',
   summary: 'Place series on the canvas. Series not on the canvas are ignored',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: {
     body: { required: true, content: { 'application/json': { schema: putCanvasPositionsSchema } } },
   },
@@ -141,7 +140,7 @@ const putLinkRoute = createRoute({
   path: '/me/canvas/links',
   summary: 'Link two series on the canvas, or change the kind of their link',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: {
     body: { required: true, content: { 'application/json': { schema: putCanvasLinkSchema } } },
   },
@@ -161,7 +160,7 @@ const deleteLinkRoute = createRoute({
   path: '/me/canvas/links',
   summary: 'Remove the link between two series. Nothing to remove is not an error',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { query: deleteCanvasLinkQuerySchema },
   responses: {
     204: { description: 'No link between them' },

@@ -14,7 +14,6 @@ import { displayName } from '../auth/accounts.ts';
 import type { Database } from '../db/client.ts';
 import { friendship, user } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
-import { privateNoStore } from '../lib/http-cache.ts';
 import { decodeCursor, keyset, toPage } from '../lib/pagination.ts';
 import {
   conflict,
@@ -78,7 +77,7 @@ const listRoute = createRoute({
   path: '/friends',
   summary: 'Accepted friends and pending requests either way, by username',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { query: friendListQuerySchema },
   responses: {
     200: {
@@ -95,7 +94,7 @@ const createRequestRoute = createRoute({
   path: '/friends/requests',
   summary: 'Send a friend request to an exact username, ignoring case',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: {
     body: {
       required: true,
@@ -119,7 +118,7 @@ const acceptRoute = createRoute({
   path: '/friends/requests/{id}/accept',
   summary: 'Accept a pending request sent to the current user',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: idParamSchema },
   responses: {
     200: {
@@ -137,7 +136,7 @@ const declineRoute = createRoute({
   path: '/friends/requests/{id}/decline',
   summary: 'Decline a pending request sent to the current user. The sender may ask again',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: idParamSchema },
   responses: {
     204: { description: 'Declined' },
@@ -152,7 +151,7 @@ const cancelRoute = createRoute({
   path: '/friends/requests/{id}',
   summary: 'Cancel a pending request the current user sent',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: idParamSchema },
   responses: {
     204: { description: 'Cancelled' },
@@ -167,7 +166,7 @@ const unfriendRoute = createRoute({
   path: '/friends/{id}',
   summary: 'End a friendship, from either side',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: idParamSchema },
   responses: {
     204: { description: 'No longer friends' },

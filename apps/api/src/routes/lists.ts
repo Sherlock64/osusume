@@ -19,7 +19,7 @@ import { createMiddleware } from 'hono/factory';
 import { listEntry, listSettings } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError, isForeignKeyViolation } from '../lib/errors.ts';
-import { privateNoStore, publicNoStore } from '../lib/http-cache.ts';
+import { publicNoStore } from '../lib/http-cache.ts';
 import { decodeCursor } from '../lib/pagination.ts';
 import {
   createRouter,
@@ -63,7 +63,7 @@ const getListRoute = createRoute({
   path: '/me/list',
   summary: "The current user's list, one item per series by title, with notes",
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { query: listQuerySchema },
   responses: {
     200: {
@@ -80,7 +80,7 @@ const putEntryRoute = createRoute({
   path: '/me/list/{seasonId}',
   summary: 'Add a season to the list or change its entry',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: {
     params: seasonIdParamSchema,
     body: { required: true, content: { 'application/json': { schema: putListEntrySchema } } },
@@ -101,7 +101,7 @@ const deleteEntryRoute = createRoute({
   path: '/me/list/{seasonId}',
   summary: 'Take a season off the list',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: seasonIdParamSchema },
   responses: {
     204: { description: 'Taken off the list' },
@@ -116,7 +116,7 @@ const getSettingsRoute = createRoute({
   path: '/me/list-settings',
   summary: "Who can see the current user's list",
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   responses: {
     200: {
       description: 'The settings',
@@ -131,7 +131,7 @@ const putSettingsRoute = createRoute({
   path: '/me/list-settings',
   summary: 'Choose who can see the list. The public slug exists only while public',
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: {
     body: { required: true, content: { 'application/json': { schema: putListSettingsSchema } } },
   },
@@ -150,7 +150,7 @@ const memberListRoute = createRoute({
   path: '/users/{username}/list',
   summary: "A member's list, without notes. Not found if missing, disabled or not visible",
   security: sessionSecurity,
-  middleware: [privateNoStore, requireSession] as const,
+  middleware: requireSession,
   request: { params: usernameParamSchema, query: listQuerySchema },
   responses: {
     200: {
