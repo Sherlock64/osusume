@@ -1,4 +1,4 @@
-import { listStatuses, listStatusSchema, type ListStatus } from '@osusume/shared';
+import { listStatuses, listStatusSchema, type ListStatus, listStatusLabels } from '@osusume/shared';
 import { createRoute, Link } from '@tanstack/react-router';
 import { z } from 'zod';
 import { ListSeries } from '@/components/list-series';
@@ -7,7 +7,6 @@ import { TextLink } from '@/components/text-link';
 import { buttonVariants } from '@/components/ui/button';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
-import { listStatusLabels } from '@/lib/list-status';
 import { ownListKey } from '@/lib/own-list';
 import { useCursorList } from '@/lib/pagination';
 import { appRoute } from '@/routes/app';

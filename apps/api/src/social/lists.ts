@@ -1,4 +1,10 @@
-import { type ListQuery, type ListStatus, type VisibilityTier, usernameKey } from '@osusume/shared';
+import {
+  type ListQuery,
+  type ListStatus,
+  type VisibilityTier,
+  listStatusLabels,
+  usernameKey,
+} from '@osusume/shared';
 import { and, asc, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
 import type { Database } from '../db/client.ts';
@@ -106,14 +112,6 @@ export async function loadListRefBySlug(db: Database, slug: string): Promise<Lis
 /** The one answer for a list that is missing, hidden or belongs to a disabled user. */
 export const listNotFound = () => new ApiError(404, 'list_not_found', 'No such list.');
 
-const STATUS_NAMES: Record<ListStatus, string> = {
-  plan_to_watch: 'Plan to watch',
-  watching: 'Watching',
-  completed: 'Completed',
-  on_hold: 'On hold',
-  dropped: 'Dropped',
-};
-
 // Which status speaks for a series with several: what is in progress, then what is done.
 const STATUS_PRECEDENCE: readonly ListStatus[] = [
   'watching',
@@ -133,7 +131,7 @@ export function deriveSeriesStatus(statuses: readonly ListStatus[], totalSeasons
     status,
     count: matching,
     totalSeasons,
-    label: `${STATUS_NAMES[status]} ${String(matching)}/${String(totalSeasons)} ${unit}`,
+    label: `${listStatusLabels[status]} ${String(matching)}/${String(totalSeasons)} ${unit}`,
   };
 }
 

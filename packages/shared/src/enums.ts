@@ -13,6 +13,13 @@ export const listStatuses = [
 ] as const;
 export const listStatusSchema = z.enum(listStatuses);
 export type ListStatus = z.infer<typeof listStatusSchema>;
+export const listStatusLabels: Record<ListStatus, string> = {
+  plan_to_watch: 'Plan to watch',
+  watching: 'Watching',
+  completed: 'Completed',
+  on_hold: 'On hold',
+  dropped: 'Dropped',
+};
 
 export const visibilityTiers = ['private', 'friends', 'members', 'public'] as const;
 export const visibilityTierSchema = z.enum(visibilityTiers);

@@ -4,7 +4,7 @@ import { createRoute, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { z } from 'zod';
 import { Form, SubmitButton, TextareaField, TextField } from '@/components/form';
-import { SeasonFields } from '@/components/season-fields';
+import { SeasonFields, SeasonList } from '@/components/season-fields';
 import { SeriesSearch } from '@/components/series-search';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { TextLink } from '@/components/text-link';
@@ -40,9 +40,7 @@ function SuggestedTagsField({ form }: { form: FormState }) {
 function NewSeriesForm() {
   const fileRequest = useFileRequest();
   const form = useForm({ schema: newSeriesFormSchema, onSubmit: fileRequest });
-  // Stable keys, so that removing a season keeps what was typed in the others.
   const [seasonKeys, setSeasonKeys] = useState<number[]>([]);
-  const [nextKey, setNextKey] = useState(0);
 
   return (
     <Form form={form}>
@@ -50,36 +48,7 @@ function NewSeriesForm() {
       <TextareaField form={form} name="altTitles" label="Alternate titles (optional)" hint="One per line." />
       <TextareaField form={form} name="synopsis" label="Synopsis (optional)" />
       <SuggestedTagsField form={form} />
-      {seasonKeys.map((key, index) => (
-        <fieldset key={key} className="flex flex-col gap-4 rounded-md border p-3">
-          <legend className="px-1 text-sm font-medium">Season</legend>
-          <SeasonFields form={form} prefix={`seasons.${String(index)}.`} />
-          <div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setSeasonKeys((keys) => keys.filter((other) => other !== key));
-              }}
-            >
-              Remove this season
-            </Button>
-          </div>
-        </fieldset>
-      ))}
-      <div>
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => {
-            setSeasonKeys((keys) => [...keys, nextKey]);
-            setNextKey(nextKey + 1);
-          }}
-        >
-          Add a season
-        </Button>
-      </div>
+      <SeasonList form={form} seasonKeys={seasonKeys} onChange={setSeasonKeys} />
       <SubmitButton form={form}>Send request</SubmitButton>
     </Form>
   );

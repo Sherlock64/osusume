@@ -46,6 +46,20 @@ function toEntry(row: typeof listEntry.$inferSelect) {
   };
 }
 
+type ListedSeason = Awaited<ReturnType<typeof loadListPage>>['items'][number]['seasons'][number];
+
+function toMemberSeason({ entry, season, matched }: ListedSeason) {
+  return {
+    seasonId: season.id,
+    title: season.title,
+    ordinal: season.ordinal,
+    year: season.year,
+    seasonOfYear: season.seasonOfYear,
+    status: entry.status,
+    matched,
+  };
+}
+
 export const listRoutes = createRouter()
   // The current user's list, one item per series by title, with notes
   .get('/me/list', requireSession, valid('query', listQuerySchema), async (c) => {
@@ -61,17 +75,11 @@ export const listRoutes = createRouter()
           seriesId: item.seriesId,
           title: item.title,
           seriesStatus: item.seriesStatus,
-          seasons: item.seasons.map(({ entry, season, matched }) => ({
-            seasonId: season.id,
-            title: season.title,
-            ordinal: season.ordinal,
-            year: season.year,
-            seasonOfYear: season.seasonOfYear,
-            status: entry.status,
-            matched,
-            note: entry.note,
-            createdAt: entry.createdAt.toISOString(),
-            updatedAt: entry.updatedAt.toISOString(),
+          seasons: item.seasons.map((listed) => ({
+            ...toMemberSeason(listed),
+            note: listed.entry.note,
+            createdAt: listed.entry.createdAt.toISOString(),
+            updatedAt: listed.entry.updatedAt.toISOString(),
           })),
         })),
         nextCursor,
@@ -186,15 +194,7 @@ export const listRoutes = createRouter()
             seriesId: item.seriesId,
             title: item.title,
             seriesStatus: item.seriesStatus,
-            seasons: item.seasons.map(({ entry, season, matched }) => ({
-              seasonId: season.id,
-              title: season.title,
-              ordinal: season.ordinal,
-              year: season.year,
-              seasonOfYear: season.seasonOfYear,
-              status: entry.status,
-              matched,
-            })),
+            seasons: item.seasons.map(toMemberSeason),
           })),
           nextCursor,
         },

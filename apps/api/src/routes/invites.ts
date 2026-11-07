@@ -10,6 +10,7 @@ import { and, eq, or, sql } from 'drizzle-orm';
 import { z } from 'zod';
 import {
   assertEmailUnused,
+  displayName,
   hashPassword,
   insertAccount,
   isAddressRefusal,
@@ -72,7 +73,7 @@ async function requesterUsernameOf(tx: Transaction, requesterId: string | null) 
     .select({ username: user.username, displayUsername: user.displayUsername })
     .from(user)
     .where(eq(user.id, requesterId));
-  return row ? (row.displayUsername ?? row.username) : null;
+  return row ? displayName(row) : null;
 }
 
 export const inviteRoutes = createRouter()

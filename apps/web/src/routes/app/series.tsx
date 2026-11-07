@@ -1,4 +1,4 @@
-import type { Season } from '@osusume/shared';
+import { type Season, listStatusLabels } from '@osusume/shared';
 import { useQuery } from '@tanstack/react-query';
 import { createRoute } from '@tanstack/react-router';
 import { CoverImage } from '@/components/cover-image';
@@ -9,7 +9,6 @@ import { TextLink } from '@/components/text-link';
 import { api } from '@/lib/api';
 import { isNotFoundError, request } from '@/lib/api-request';
 import { formatAired } from '@/lib/catalog-format';
-import { listStatusLabels } from '@/lib/list-status';
 import { ownEntriesQuery } from '@/lib/own-list';
 import { useCursorList } from '@/lib/pagination';
 import { appRoute } from '@/routes/app';
