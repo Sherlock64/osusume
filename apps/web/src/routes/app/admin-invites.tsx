@@ -1,23 +1,15 @@
-import type { AdminInviteRequest, InviteRequestStatus } from '@osusume/shared';
+import { inviteRequestStatuses, type AdminInviteRequest, type InviteRequestStatus } from '@osusume/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createRoute } from '@tanstack/react-router';
 import { useState } from 'react';
-import { ActionButton, StatusFilter } from '@/components/admin';
+import { ActionButton, AdminRow, QueueBadge, StatusFilter } from '@/components/admin';
 import { ConfirmButton } from '@/components/confirm-button';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
-import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { useCursorList } from '@/lib/pagination';
 import { adminRoute } from '@/routes/app/admin';
-
-const statusLabels: Record<InviteRequestStatus, string> = {
-  pending: 'Pending',
-  approved: 'Approved',
-  rejected: 'Rejected',
-  accepted: 'Accepted',
-  revoked: 'Revoked',
-};
 
 /** An approved invite past its date no longer works, though its status stays the same. */
 function hasExpired(invite: AdminInviteRequest): boolean {
@@ -40,45 +32,47 @@ function InviteRow({ invite }: { invite: AdminInviteRequest }) {
   const expired = hasExpired(invite);
 
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4">
-        <h2 className="min-w-0 font-medium wrap-anywhere">{invite.inviteeEmail}</h2>
-        <Badge variant={invite.status === 'rejected' || expired ? 'destructive' : 'secondary'}>
-          {expired ? 'Expired' : statusLabels[invite.status]}
-        </Badge>
-      </div>
-      <p className="text-muted-foreground text-sm wrap-anywhere">
-        Requested by {invite.requesterUsername ?? 'a removed user'} on{' '}
-        {new Date(invite.createdAt).toLocaleDateString()}
-        {invite.status === 'approved' &&
-          invite.expiresAt !== null &&
-          ` · ${expired ? 'expired' : 'expires'} ${new Date(invite.expiresAt).toLocaleDateString()}`}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {invite.status === 'pending' && (
+    <AdminRow
+      title={invite.inviteeEmail}
+      badges={<QueueBadge state={expired ? 'expired' : invite.status} />}
+      meta={
+        <p>
+          Requested by {invite.requesterUsername ?? 'a removed user'} on{' '}
+          {new Date(invite.createdAt).toLocaleDateString()}
+          {invite.status === 'approved' &&
+            invite.expiresAt !== null &&
+            ` · ${expired ? 'expired' : 'expires'} ${new Date(invite.expiresAt).toLocaleDateString()}`}
+        </p>
+      }
+      actions={
+        (invite.status === 'pending' || (invite.status === 'approved' && !expired)) && (
           <>
-            <ActionButton label="Approve" variant="default" onAction={() => decide('approve')} />
-            <ConfirmButton
-              label="Reject"
-              title={`Reject the invite for ${invite.inviteeEmail}?`}
-              description="No email is sent, and this can't be undone. The address can be requested again."
-              onConfirm={() => decide('reject')}
-            />
+            {invite.status === 'pending' && (
+              <>
+                <ActionButton label="Approve" variant="default" onAction={() => decide('approve')} />
+                <ConfirmButton
+                  label="Reject"
+                  title={`Reject the invite for ${invite.inviteeEmail}?`}
+                  description="No email is sent, and this can't be undone. The address can be requested again."
+                  onConfirm={() => decide('reject')}
+                />
+              </>
+            )}
+            {invite.status === 'approved' && !expired && (
+              <ConfirmButton
+                label="Revoke"
+                title={`Revoke the invite for ${invite.inviteeEmail}?`}
+                description="The emailed link stops working straight away. The address can be requested again."
+                onConfirm={async () => {
+                  await request(api.admin['invite-requests'][':id'].revoke.$post({ param: { id: invite.id } }));
+                  await refresh();
+                }}
+              />
+            )}
           </>
-        )}
-        {invite.status === 'approved' && !expired && (
-          <ConfirmButton
-            label="Revoke"
-            title={`Revoke the invite for ${invite.inviteeEmail}?`}
-            description="The emailed link stops working straight away. The address can be requested again."
-            onConfirm={async () => {
-              await request(api.admin['invite-requests'][':id'].revoke.$post({ param: { id: invite.id } }));
-              await refresh();
-            }}
-          />
-        )}
-      </div>
-    </li>
+        )
+      }
+    />
   );
 }
 
@@ -99,13 +93,17 @@ function AdminInvitesPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Invite queue</h1>
-      <StatusFilter value={status} labels={statusLabels} onChange={setStatus} />
+      <PageHeader
+        eyebrow="Admin"
+        title="Invite queue"
+        description="Addresses members have asked to invite. Approving emails them a link."
+      />
+      <StatusFilter value={status} statuses={inviteRequestStatuses} onChange={setStatus} />
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
-        <EmptyState title="No invites here" />
-      : <ul className="divide-y">
+        <EmptyState title={status === 'pending' ? 'No invites are waiting' : 'No invites here'} />
+      : <ul className="divide-y border-b">
           {items.map((invite) => (
             <InviteRow key={invite.id} invite={invite} />
           ))}

@@ -1,12 +1,13 @@
 import { SEARCH_QUERY_MAX_LENGTH, type SeriesSummary } from '@osusume/shared';
 import { useQueryClient } from '@tanstack/react-query';
-import { createRoute, useNavigate } from '@tanstack/react-router';
+import { createRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 import { SeriesForm } from '@/components/admin-series-form';
+import { AdminPanel } from '@/components/admin';
 import { CoverImage } from '@/components/cover-image';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
 import { TagList } from '@/components/tag-list';
-import { TextLink } from '@/components/text-link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,13 +18,18 @@ import { adminRoute } from '@/routes/app/admin';
 
 function SeriesRow({ series }: { series: SeriesSummary }) {
   return (
-    <li className="flex gap-3 py-3">
-      <CoverImage cover={series.cover} size="small" alt="" className="w-12 shrink-0" />
+    <li className="group relative flex gap-3 border-b py-3">
+      <CoverImage cover={series.cover} size="small" alt="" title={series.title} className="w-12 shrink-0 self-start" />
       <div className="flex min-w-0 flex-col gap-1">
-        <h2 className="font-medium wrap-anywhere">
-          <TextLink to="/admin/catalog/$id" params={{ id: series.id }} className="text-base">
+        <h2 className="font-sans text-base font-medium tracking-normal wrap-anywhere">
+          {/* The whole row is the target: the tags under it are not interactive. */}
+          <Link
+            to="/admin/catalog/$id"
+            params={{ id: series.id }}
+            className="rounded-xs group-hover:underline after:absolute after:inset-0"
+          >
             {series.title}
-          </TextLink>
+          </Link>
         </h2>
         <p className="text-muted-foreground text-sm">
           {`${String(series.seasonCount)} ${series.seasonCount === 1 ? 'season' : 'seasons'}`}
@@ -67,26 +73,32 @@ function AdminCatalogPage() {
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Manage catalog</h1>
-        <Button
-          variant="outline"
-          aria-expanded={creating}
-          onClick={() => {
-            setCreating((open) => !open);
-          }}
-        >
-          {creating ? 'Close' : 'New series'}
-        </Button>
-      </div>
+      <PageHeader
+        eyebrow="Admin"
+        title="Manage catalog"
+        description="Open a series to edit its details, images and seasons."
+        actions={
+          <Button
+            variant={creating ? 'outline' : 'default'}
+            aria-expanded={creating}
+            onClick={() => {
+              setCreating((open) => !open);
+            }}
+          >
+            {creating ? 'Close' : 'New series'}
+          </Button>
+        }
+      />
       {creating && (
-        <div className="mb-6 rounded-md border p-3">
-          <NewSeries />
+        <div className="mb-8">
+          <AdminPanel>
+            <NewSeries />
+          </AdminPanel>
         </div>
       )}
       <form
         role="search"
-        className="mb-2 flex flex-wrap items-end gap-2"
+        className="mb-2 flex max-w-xl flex-wrap items-end gap-2"
         onSubmit={(event) => {
           event.preventDefault();
           const value = new FormData(event.currentTarget).get('q');
@@ -104,8 +116,8 @@ function AdminCatalogPage() {
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
-        <EmptyState title="No series found" />
-      : <ul className="divide-y">
+        <EmptyState title={q === '' ? 'No series yet' : `No series match “${q}”`} />
+      : <ul className="grid gap-x-8 md:grid-cols-2 xl:grid-cols-3">
           {items.map((series) => (
             <SeriesRow key={series.id} series={series} />
           ))}

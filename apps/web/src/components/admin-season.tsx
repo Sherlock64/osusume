@@ -1,6 +1,8 @@
 import type { Cover, Season, SeriesSummary } from '@osusume/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { Check } from 'lucide-react';
 import { useState } from 'react';
+import { AdminPanel, AdminRow } from '@/components/admin';
 import { useSeriesImages } from '@/components/admin-series-images';
 import { ConfirmButton } from '@/components/confirm-button';
 import { CoverImage } from '@/components/cover-image';
@@ -86,7 +88,7 @@ function SeasonCover({ season }: { season: Season }) {
         <p className="text-muted-foreground text-sm">
           This series has no images yet, so a placeholder shows. Upload one above to choose it here.
         </p>
-      : <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5 md:grid-cols-6">
+      : <ul className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-3 xl:grid-cols-4">
           {choices.map((choice) => (
             <li key={choice.id ?? 'primary'} className="min-w-0">
               <button
@@ -94,15 +96,18 @@ function SeasonCover({ season }: { season: Season }) {
                 aria-pressed={season.coverImageId === choice.id}
                 disabled={choose.isPending}
                 className={cn(
-                  'hover:bg-muted flex w-full cursor-pointer flex-col gap-1 rounded-md border p-1 text-left text-xs',
-                  season.coverImageId === choice.id && 'border-primary ring-primary ring-1',
+                  'hover:bg-accent flex w-full cursor-pointer flex-col gap-1 rounded-md border p-1 text-left text-xs transition-colors disabled:cursor-default disabled:opacity-60',
+                  season.coverImageId === choice.id && 'border-primary-edge bg-accent border-2 p-[3px] font-medium',
                 )}
                 onClick={() => {
                   choose.mutate(choice.id);
                 }}
               >
-                <CoverImage cover={choice.cover} size="small" alt="" />
-                {choice.label}
+                <CoverImage cover={choice.cover} size="small" alt="" title={season.title} />
+                <span className="flex items-center gap-1">
+                  {season.coverImageId === choice.id && <Check className="size-3 shrink-0" aria-hidden />}
+                  {choice.label}
+                </span>
               </button>
             </li>
           ))}
@@ -161,7 +166,7 @@ function MoveForm({
 function SeasonMove({ season, onMoved }: { season: Season; onMoved: (message: string) => void }) {
   const [target, setTarget] = useState<SeriesSummary | null>(null);
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3 border-t pt-4">
       <h3 className="text-sm font-medium">Move to another series</h3>
       <SeriesSearch label="Which series?" excludeId={season.seriesId} onPick={setTarget} />
       {target !== null && <MoveForm key={target.id} season={season} target={target} onMoved={onMoved} />}
@@ -178,40 +183,49 @@ export function SeasonRow({ season, onMoved }: { season: Season; onMoved: (messa
   ].filter((part) => part !== null);
 
   return (
-    <li className="flex flex-col gap-3 py-3">
-      <div className="flex gap-3">
-        <CoverImage cover={season.cover} size="small" alt="" className="w-12 shrink-0" />
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
-          <h3 className="font-medium wrap-anywhere">
-            Season {season.ordinal}: {season.title}
-          </h3>
-          {details.length > 0 && <p className="text-muted-foreground text-sm">{details.join(' · ')}</p>}
+    <AdminRow
+      heading="h3"
+      leading={<CoverImage cover={season.cover} size="small" alt="" title={season.title} className="w-12 shrink-0 self-start" />}
+      title={`Season ${String(season.ordinal)}: ${season.title}`}
+      meta={
+        <>
+          {details.length > 0 && <p>{details.join(' · ')}</p>}
           <TagList tags={season.ownTags} />
-          <div className="mt-1 flex flex-wrap gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              aria-expanded={open}
-              onClick={() => {
-                setOpen((next) => !next);
-              }}
-            >
-              {open ? 'Close' : 'Edit'}
-            </Button>
-            <ConfirmButton
-              label="Delete"
-              title={`Delete ${season.title}?`}
-              description="This can't be undone. A season on anyone's list can't be deleted."
-              onConfirm={async () => {
-                await request(api.seasons[':id'].$delete({ param: { id: season.id } }));
-                await queryClient.invalidateQueries();
-              }}
-            />
-          </div>
-        </div>
-      </div>
+        </>
+      }
+      actions={
+        <>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-expanded={open}
+            onClick={() => {
+              setOpen((next) => !next);
+            }}
+          >
+            {open ? 'Close' : 'Edit'}
+          </Button>
+          <ConfirmButton
+            label="Delete"
+            title={`Delete ${season.title}?`}
+            description="This can't be undone. A season on anyone's list can't be deleted."
+            onConfirm={async () => {
+              await request(api.seasons[':id'].$delete({ param: { id: season.id } }));
+              await queryClient.invalidateQueries();
+            }}
+          />
+        </>
+      }
+    >
       {open && (
-        <div className="flex flex-col gap-6 rounded-md border p-3">
+        <AdminPanel
+          aside={
+            <>
+              <SeasonCover season={season} />
+              <SeasonMove season={season} onMoved={onMoved} />
+            </>
+          }
+        >
           <SeasonForm
             seriesId={season.seriesId}
             season={season}
@@ -219,14 +233,8 @@ export function SeasonRow({ season, onMoved }: { season: Season; onMoved: (messa
               setOpen(false);
             }}
           />
-          <div className="border-t pt-4">
-            <SeasonCover season={season} />
-          </div>
-          <div className="border-t pt-4">
-            <SeasonMove season={season} onMoved={onMoved} />
-          </div>
-        </div>
+        </AdminPanel>
       )}
-    </li>
+    </AdminRow>
   );
 }

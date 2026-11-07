@@ -1,8 +1,9 @@
 import type { AdminUser } from '@osusume/shared';
 import { useQueryClient } from '@tanstack/react-query';
 import { createRoute, useNavigate } from '@tanstack/react-router';
-import { ActionButton } from '@/components/admin';
+import { ActionButton, AdminRow } from '@/components/admin';
 import { ConfirmButton } from '@/components/confirm-button';
+import { PageHeader } from '@/components/page-header';
 import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
 import { Badge } from '@/components/ui/badge';
 import { api } from '@/lib/api';
@@ -39,10 +40,11 @@ function UserActions({ target, isSelf }: { target: AdminUser; isSelf: boolean })
   };
 
   return (
-    <div className="flex flex-wrap gap-2">
+    <>
       {target.role === 'member' ?
         <ConfirmButton
           label="Promote"
+          variant="outline"
           title={`Make ${name} an admin?`}
           description="Admins can approve invites and requests, change the catalog, and act on other accounts, including other admins."
           onConfirm={async () => {
@@ -52,6 +54,7 @@ function UserActions({ target, isSelf }: { target: AdminUser; isSelf: boolean })
         />
       : <ConfirmButton
           label="Demote"
+          variant="outline"
           title={`Make ${name} a member?`}
           description={`This takes away every admin screen and action.${forSelf('You lose them straight away, and only another admin can promote you again.')}`}
           onConfirm={async () => {
@@ -63,6 +66,7 @@ function UserActions({ target, isSelf }: { target: AdminUser; isSelf: boolean })
       {target.disabledAt === null ?
         <ConfirmButton
           label="Disable"
+          variant="outline"
           title={`Disable ${name}?`}
           description={`The account is signed out immediately and can't log in, and its list is hidden, including any public link. An admin can re-enable it.${forSelf('You will be signed out now, and only another admin can let you back in.')}`}
           onConfirm={async () => {
@@ -96,31 +100,36 @@ function UserActions({ target, isSelf }: { target: AdminUser; isSelf: boolean })
           await afterAccessEnds();
         }}
       />
-    </div>
+    </>
   );
 }
 
 function UserRow({ target, isSelf }: { target: AdminUser; isSelf: boolean }) {
   return (
-    <li className="flex flex-col gap-2 py-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="min-w-0 font-medium wrap-anywhere">
+    <AdminRow
+      title={
+        <>
           {target.username}
           {isSelf && <span className="text-muted-foreground font-normal"> (you)</span>}
-        </h2>
-        <div className="flex flex-wrap gap-1">
+        </>
+      }
+      badges={
+        <>
           <Badge variant="secondary">{target.role === 'admin' ? 'Admin' : 'Member'}</Badge>
           {target.isFirstAdmin && <Badge variant="secondary">First admin</Badge>}
           {target.disabledAt !== null && <Badge variant="destructive">Disabled</Badge>}
-        </div>
-      </div>
-      <p className="text-muted-foreground text-sm wrap-anywhere">
-        {target.email} · joined {new Date(target.createdAt).toLocaleDateString()}
-      </p>
-      {target.isFirstAdmin ?
-        <p className="text-muted-foreground text-sm">The first admin is permanent and can't be changed.</p>
-      : <UserActions target={target} isSelf={isSelf} />}
-    </li>
+        </>
+      }
+      meta={
+        <>
+          <p>
+            {target.email} · joined {new Date(target.createdAt).toLocaleDateString()}
+          </p>
+          {target.isFirstAdmin && <p>The first admin is permanent and can't be changed.</p>}
+        </>
+      }
+      actions={!target.isFirstAdmin && <UserActions target={target} isSelf={isSelf} />}
+    />
   );
 }
 
@@ -134,12 +143,17 @@ function AdminUsersPage() {
 
   return (
     <>
-      <h1 className="mb-4 text-xl font-semibold">Users</h1>
+      <PageHeader
+        className="mb-0"
+        eyebrow="Admin"
+        title="Users"
+        description="Everyone with an account. Disabling can be reversed. Removing and banning can't."
+      />
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
         <EmptyState title="No users" />
-      : <ul className="divide-y">
+      : <ul className="divide-y border-b">
           {items.map((target) => (
             <UserRow key={target.id} target={target} isSelf={target.id === user.id} />
           ))}

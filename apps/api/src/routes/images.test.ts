@@ -57,11 +57,11 @@ describe('authorization', () => {
     expectError(await t.upload(catalogId, png, { cookie: member.cookie }), 403, 'admin_required');
   });
 
-  it('reading needs a session', async () => {
+  it('reading needs no session, as public lists show covers', async () => {
     const { id } = await uploaded();
     const response = await t.app.request(`http://osusume.test/api/v1/images/${id}/small`);
-    expect(response.status).toBe(401);
-    expect(response.headers.get('cache-control')).toBe('private, no-store');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toBe('private, max-age=604800, immutable');
   });
 });
 

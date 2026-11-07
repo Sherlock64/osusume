@@ -1,12 +1,14 @@
 import { SEARCH_QUERY_MAX_LENGTH, type SeriesSummary } from '@osusume/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useId, useState } from 'react';
+import { CoverImage } from '@/components/cover-image';
 import { EmptyState, QueryFallback } from '@/components/states';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
+import { formatAired } from '@/lib/catalog-format';
 
 /** Finds a series by title. `excludeId` is a series that can't be chosen. */
 export function SeriesSearch({
@@ -56,12 +58,18 @@ export function SeriesSearch({
               <li key={series.id}>
                 <Button
                   variant="ghost"
-                  className="h-auto w-full justify-start text-left whitespace-normal wrap-anywhere"
+                  className="h-auto w-full justify-start gap-3 py-1.5 text-left font-normal whitespace-normal wrap-anywhere"
                   onClick={() => {
                     onPick(series);
                   }}
                 >
-                  {series.title}
+                  <CoverImage cover={series.cover} size="small" alt="" title={series.title} className="w-10 shrink-0" />
+                  <span className="min-w-0">
+                    <span className="block font-medium">{series.title}</span>
+                    <span className="text-muted-foreground block text-xs">
+                      {formatAired(series.firstYear, series.firstSeasonOfYear)}
+                    </span>
+                  </span>
                 </Button>
               </li>
             ))}

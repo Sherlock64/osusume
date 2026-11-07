@@ -1,9 +1,11 @@
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { type TestApp, createTestApp, expectError } from '../test-support/test-app.ts';
 
 let t: TestApp;
 let admin: Awaited<ReturnType<TestApp['seedLoggedIn']>>;
 let seasonIds: string[];
+let covers: { id: string; width: number; height: number }[];
 
 beforeAll(async () => {
   t = await createTestApp();
@@ -20,6 +22,21 @@ beforeAll(async () => {
     );
     seasonIds.push((season.body as { id: string }).id);
   }
+  // The first upload is the series' primary; S2 picks the second as its own cover.
+  const png = await sharp({ create: { width: 60, height: 90, channels: 3, background: 'teal' } }).png().toBuffer();
+  covers = [];
+  for (let index = 0; index < 2; index += 1) {
+    const uploaded = await t.upload(seriesId, png, { cookie: admin.cookie });
+    const { id, width, height } = uploaded.body as { id: string; width: number; height: number };
+    covers.push({ id, width, height });
+  }
+  const patched = await t.request(
+    'PATCH',
+    `/api/v1/seasons/${seasonIds[1] ?? ''}`,
+    { coverImageId: covers[1]?.id },
+    { cookie: admin.cookie },
+  );
+  expect(patched.status).toBe(200);
 });
 
 afterAll(async () => {
@@ -76,6 +93,7 @@ describe('compare', () => {
     expect(body.comparison?.onAll).toMatchObject([
       {
         seasonTitle: 'S1',
+        cover: covers[0],
         on: [an, bn, cn],
         statuses: [
           { username: an, status: 'completed' },
@@ -87,6 +105,7 @@ describe('compare', () => {
     expect(body.comparison?.onSome).toMatchObject([
       {
         seasonTitle: 'S2',
+        cover: covers[1],
         on: [an, bn],
         statuses: [
           { username: an, status: 'watching' },

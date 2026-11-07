@@ -9,7 +9,7 @@ import { authClient } from '@/lib/auth-client';
 import { useForm } from '@/lib/form';
 import { safeRedirect } from '@/lib/guards';
 import { sessionQuery, setupStatusQuery } from '@/lib/session';
-import { rootRoute } from '@/routes/root';
+import { PublicRouteError, rootRoute } from '@/routes/root';
 
 // Only presence is checked: the rules for new credentials say nothing about existing ones.
 const loginSchema = z.object({
@@ -32,7 +32,10 @@ function LoginPage() {
   });
 
   return (
-    <PublicCard title="Log in to Osusume">
+    <PublicCard
+      title="Log in to Osusume"
+      description="Invite only. Your anime list, your friends' lists, and the constellations between them."
+    >
       <Form form={form}>
         <TextField form={form} name="username" label="Username" autoComplete="username" />
         <TextField
@@ -60,4 +63,5 @@ export const loginRoute = createRoute({
     if (open) throw redirect({ to: '/setup' });
   },
   component: LoginPage,
+  errorComponent: PublicRouteError,
 });

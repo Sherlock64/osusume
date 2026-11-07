@@ -1,6 +1,8 @@
 import { createInviteRequestSchema } from '@osusume/shared';
 import { createRoute } from '@tanstack/react-router';
 import { Form, SubmitButton, TextField } from '@/components/form';
+import { PageHeader } from '@/components/page-header';
+import { TextLink } from '@/components/text-link';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
@@ -28,12 +30,21 @@ function InviteForm({ rounds }: { rounds: FormRounds }) {
 
 function InvitesPage() {
   const rounds = useFormRounds();
+  const { user } = appRoute.useRouteContext();
   return (
-    <div className="max-w-md">
-      <h1 className="mb-4 text-xl font-semibold">Invite someone</h1>
+    <div className="max-w-xl">
+      <PageHeader title="Invite someone" />
       {rounds.message !== null && (
         <Alert className="mb-4" role="status">
-          <AlertDescription>{rounds.message}</AlertDescription>
+          {/* The api tells everyone the admins have it, which for an admin means their own queue. */}
+          <AlertDescription>
+            {user.role === 'admin' ?
+              <>
+                <p>The request is waiting for your approval.</p>
+                <TextLink to="/admin/invites">Review it in the invite queue</TextLink>
+              </>
+            : rounds.message}
+          </AlertDescription>
         </Alert>
       )}
       <InviteForm key={rounds.formKey} rounds={rounds} />

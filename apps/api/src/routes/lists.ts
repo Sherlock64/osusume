@@ -74,6 +74,7 @@ export const listRoutes = createRouter()
         items: items.map((item) => ({
           seriesId: item.seriesId,
           title: item.title,
+          cover: item.cover,
           seriesStatus: item.seriesStatus,
           seasons: item.seasons.map((listed) => ({
             ...toMemberSeason(listed),
@@ -193,6 +194,7 @@ export const listRoutes = createRouter()
           items: items.map((item) => ({
             seriesId: item.seriesId,
             title: item.title,
+            cover: item.cover,
             seriesStatus: item.seriesStatus,
             seasons: item.seasons.map(toMemberSeason),
           })),
@@ -202,7 +204,7 @@ export const listRoutes = createRouter()
       );
     },
   )
-  // A public list, titles and status only. Needs no login
+  // A public list: titles, covers and status, without notes. Needs no login
   .get(
     '/lists/:slug',
     publicNoStore,
@@ -227,6 +229,7 @@ export const listRoutes = createRouter()
         {
           items: items.map((item) => ({
             title: item.title,
+            cover: item.cover,
             seriesStatus: item.seriesStatus,
             seasons: item.seasons.map(({ entry, season, matched }) => ({
               title: season.title,

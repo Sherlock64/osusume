@@ -19,6 +19,8 @@ interface ConfirmButtonProps {
   title: string;
   description: string;
   confirmLabel?: string;
+  /** Outline is for what can be put back. Removal keeps the default. */
+  variant?: 'destructive' | 'outline';
   /** The dialog stays open until this settles, and shows the error if it fails. */
   onConfirm: () => Promise<unknown>;
 }
@@ -29,6 +31,7 @@ export function ConfirmButton({
   title,
   description,
   confirmLabel = label,
+  variant = 'destructive',
   onConfirm,
 }: ConfirmButtonProps) {
   const [open, setOpen] = useState(false);
@@ -49,7 +52,7 @@ export function ConfirmButton({
       }}
     >
       <AlertDialogTrigger asChild>
-        <Button type="button" variant="outline" size="sm">
+        <Button type="button" variant={variant} size="sm">
           {label}
         </Button>
       </AlertDialogTrigger>
@@ -66,7 +69,7 @@ export function ConfirmButton({
         <AlertDialogFooter>
           <AlertDialogCancel disabled={action.isPending}>Cancel</AlertDialogCancel>
           <Button
-            variant="destructive"
+            variant={variant === 'destructive' ? 'destructive' : 'default'}
             disabled={action.isPending}
             onClick={() => {
               action.mutate();

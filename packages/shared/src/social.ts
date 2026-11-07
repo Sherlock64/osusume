@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { usernameKey, usernameSchema } from './accounts.ts';
-import { TITLE_MAX_LENGTH } from './catalog.ts';
+import { TITLE_MAX_LENGTH, coverSchema } from './catalog.ts';
 import { listStatusSchema, visibilityTierSchema } from './enums.ts';
 import { paginationQuerySchema } from './http.ts';
 
@@ -109,6 +109,8 @@ export const compareRowSchema = z.object({
   seriesTitle: z.string(),
   seasonTitle: z.string(),
   ordinal: z.number().int(),
+  /** The season's own cover, else its series' primary image. */
+  cover: coverSchema.nullable(),
   /** Who has this season, in the order of `users`. */
   on: z.array(z.string()),
   /** Every compared person, with null for those who do not have this season. */

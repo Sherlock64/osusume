@@ -12,9 +12,11 @@ import {
 } from '@osusume/shared';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { createRoute, useNavigate } from '@tanstack/react-router';
+import { ChevronDown } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 import { z } from 'zod';
 import { Form, SelectField, SubmitButton, TextField } from '@/components/form';
+import { PageHeader, SectionHeading } from '@/components/page-header';
 import { QueryFallback } from '@/components/states';
 import {
   AlertDialog,
@@ -26,27 +28,59 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { NativeSelectOption } from '@/components/ui/native-select';
 import { api } from '@/lib/api';
 import { authRequest, request } from '@/lib/api-request';
 import { authClient } from '@/lib/auth-client';
 import { useForm, useFormRounds, type FormRounds } from '@/lib/form';
 import { sessionQuery } from '@/lib/session';
+import { cn } from '@/lib/utils';
 import { appRoute } from '@/routes/app';
 
 const listSettingsQueryKey = ['list-settings'];
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
+/** One setting: what it is on the left, its value and controls on the right. */
+function Setting({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
+}) {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{title}</CardTitle>
-      </CardHeader>
-      <CardContent>{children}</CardContent>
-    </Card>
+    <div className="grid gap-x-8 gap-y-3 py-5 md:grid-cols-[13rem_minmax(0,1fr)]">
+      <div>
+        <h3 className="font-medium">{title}</h3>
+        {description !== undefined && (
+          <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>
+        )}
+      </div>
+      <div className="flex max-w-md min-w-0 flex-col gap-3">{children}</div>
+    </div>
+  );
+}
+
+/** A form that stays out of the way until asked for, so the page reads as values, not fields. */
+function ChangeForm({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <details className="group">
+      <summary
+        className={cn(
+          buttonVariants({ variant: 'outline' }),
+          'w-fit cursor-pointer list-none [&::-webkit-details-marker]:hidden',
+        )}
+      >
+        {label}
+        <ChevronDown className="transition-transform group-open:rotate-180" aria-hidden />
+      </summary>
+      <div className="mt-4 flex flex-col gap-3">{children}</div>
+    </details>
   );
 }
 
@@ -69,8 +103,16 @@ function PublicLink({ slug }: { slug: string }) {
   const [copied, setCopied] = useState<'yes' | 'failed' | null>(null);
   const link = `${window.location.origin}/lists/${slug}`;
   return (
-    <div className="mt-4 flex flex-col gap-2">
-      <Input aria-label="Public link" readOnly value={link} />
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <Label htmlFor="public-link">Public link</Label>
+      <Input
+        id="public-link"
+        readOnly
+        value={link}
+        onFocus={(event) => {
+          event.target.select();
+        }}
+      />
       <div className="flex flex-wrap items-center gap-3">
         <Button
           type="button"
@@ -120,7 +162,6 @@ function VisibilityForm({ settings }: { settings: ListSettings }) {
           form={form}
           name="visibility"
           label="Who can see my list"
-          hint="Leaving public ends the link. Going public again makes a new one."
           defaultValue={settings.visibility}
         >
           {visibilityTiers.map((tier) => (
@@ -148,10 +189,13 @@ function ListVisibility() {
   return <VisibilityForm settings={settings.data} />;
 }
 
-const usernameStatusLabels: Record<UsernameChangeRequestStatus, string> = {
-  pending: 'waiting for an admin',
-  approved: 'approved',
-  rejected: 'rejected',
+const usernameStatuses: Record<
+  UsernameChangeRequestStatus,
+  { label: string; variant: 'warning' | 'success' | 'destructive' }
+> = {
+  pending: { label: 'Waiting for an admin', variant: 'warning' },
+  approved: { label: 'Approved', variant: 'success' },
+  rejected: { label: 'Rejected', variant: 'destructive' },
 };
 
 const usernameChangesKey = ['username-changes', 'mine'];
@@ -193,21 +237,32 @@ function UsernameChange() {
   });
   const latestRequest = latest.data?.items[0];
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm wrap-anywhere">Your username is {user.username}.</p>
+    <>
+      <p className="font-medium wrap-anywhere">{user.username}</p>
       {latestRequest !== undefined && (
-        <Done>
-          Latest request: {latestRequest.requestedUsername},{' '}
-          {usernameStatusLabels[latestRequest.status]}.
-        </Done>
+        <div role="status" className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground wrap-anywhere">
+            Latest request: {latestRequest.requestedUsername}
+          </span>
+          <Badge variant={usernameStatuses[latestRequest.status].variant}>
+            {usernameStatuses[latestRequest.status].label}
+          </Badge>
+        </div>
       )}
-      <UsernameForm
-        key={sent}
-        onSent={() => {
-          setSent(sent + 1);
-        }}
-      />
-    </div>
+      {latestRequest?.status === 'pending' ?
+        <p className="text-muted-foreground text-sm">
+          You can ask for another change once an admin has decided this one.
+        </p>
+      : <ChangeForm label="Change username">
+          <UsernameForm
+            key={sent}
+            onSent={() => {
+              setSent(sent + 1);
+            }}
+          />
+        </ChangeForm>
+      }
+    </>
   );
 }
 
@@ -252,10 +307,12 @@ function PasswordForm({ rounds }: { rounds: FormRounds }) {
 function PasswordChange() {
   const rounds = useFormRounds();
   return (
-    <div className="flex flex-col gap-3">
-      <PasswordForm key={rounds.formKey} rounds={rounds} />
+    <>
+      <ChangeForm label="Change password">
+        <PasswordForm key={rounds.formKey} rounds={rounds} />
+      </ChangeForm>
       {rounds.message !== null && <Done>{rounds.message}</Done>}
-    </div>
+    </>
   );
 }
 
@@ -291,11 +348,13 @@ function EmailChange() {
   const { user } = appRoute.useRouteContext();
   const rounds = useFormRounds();
   return (
-    <div className="flex flex-col gap-3">
-      <p className="text-sm wrap-anywhere">Your email is {user.email}.</p>
-      <EmailForm key={rounds.formKey} rounds={rounds} />
+    <>
+      <p className="font-medium wrap-anywhere">{user.email}</p>
+      <ChangeForm label="Change email">
+        <EmailForm key={rounds.formKey} rounds={rounds} />
+      </ChangeForm>
       {rounds.message !== null && <Done>{rounds.message}</Done>}
-    </div>
+    </>
   );
 }
 
@@ -321,11 +380,10 @@ function DeleteAccount() {
         if (!form.pending) setOpen(next);
       }}
     >
-      <p className="text-muted-foreground mb-3 text-sm">
-        Your list, settings, friends and pending requests are deleted for good.
-      </p>
       <AlertDialogTrigger asChild>
-        <Button variant="destructive">Delete account</Button>
+        <Button variant="destructive" className="w-fit">
+          Delete account
+        </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -354,29 +412,87 @@ function DeleteAccount() {
   );
 }
 
+function SettingsGroup({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-20">
+      <SectionHeading>{title}</SectionHeading>
+      <div className="divide-y">{children}</div>
+    </section>
+  );
+}
+
 function SettingsPage() {
   const { user } = appRoute.useRouteContext();
+  const groups = [
+    ['list', 'My list'],
+    ['account', 'Account'],
+    ['security', 'Security'],
+    ...(user.isFirstAdmin ? [] : [['danger', 'Danger zone']]),
+  ];
   return (
-    <div className="flex max-w-xl flex-col gap-4">
-      <h1 className="text-xl font-semibold">Settings</h1>
-      <Section title="List visibility">
-        <ListVisibility />
-      </Section>
-      <Section title="Username">
-        <UsernameChange />
-      </Section>
-      <Section title="Password">
-        <PasswordChange />
-      </Section>
-      <Section title="Email">
-        <EmailChange />
-      </Section>
-      {!user.isFirstAdmin && (
-        <Section title="Delete account">
-          <DeleteAccount />
-        </Section>
-      )}
-    </div>
+    <>
+      <PageHeader title="Settings" description="Who sees your list, and how you log in." />
+      <div className="grid gap-x-12 gap-y-6 lg:grid-cols-[11rem_minmax(0,1fr)]">
+        <nav aria-label="Settings sections" className="lg:sticky lg:top-20 lg:self-start">
+          <ul className="flex flex-wrap gap-x-1 lg:flex-col">
+            {groups.map(([id, title]) => (
+              <li key={id}>
+                <a
+                  href={`#${String(id)}`}
+                  className="hover:bg-accent text-muted-foreground hover:text-accent-foreground flex h-11 items-center rounded-md px-3 text-sm md:h-9"
+                >
+                  {title}
+                </a>
+              </li>
+            ))}
+          </ul>
+        </nav>
+        <div className="flex max-w-3xl min-w-0 flex-col gap-10">
+          <SettingsGroup id="list" title="My list">
+            <Setting
+              title="Visibility"
+              description="Leaving public ends the link. Going public again makes a new one."
+            >
+              <ListVisibility />
+            </Setting>
+          </SettingsGroup>
+          <SettingsGroup id="account" title="Account">
+            <Setting title="Username" description="Friends find you by it.">
+              <UsernameChange />
+            </Setting>
+            <Setting title="Email" description="Where account links are sent.">
+              <EmailChange />
+            </Setting>
+          </SettingsGroup>
+          <SettingsGroup id="security" title="Security">
+            <Setting
+              title="Password"
+              description="Changing it logs out your other devices."
+            >
+              <PasswordChange />
+            </Setting>
+          </SettingsGroup>
+          {!user.isFirstAdmin && (
+            <SettingsGroup id="danger" title="Danger zone">
+              <Setting
+                title="Delete account"
+                description="Your list, settings, friends and pending requests are deleted for good."
+              >
+                <DeleteAccount />
+              </Setting>
+            </SettingsGroup>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
 

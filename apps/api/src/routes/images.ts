@@ -6,15 +6,13 @@ import { immutableRead } from '../lib/http-cache.ts';
 import { STORED_IMAGE_MIME } from '../lib/image-processing.ts';
 import { imageVariantKey } from '../lib/image-storage.ts';
 import { createRouter, valid } from '../lib/router.ts';
-import { requireSession } from '../middleware/auth.ts';
 
 const imageNotFound = () => new ApiError(404, 'image_not_found', 'No such image.');
 
 export const imageRoutes = createRouter()
-  // An image in a named size
+  // An image in a named size. Needs no login: every image is catalog art, shown on public lists too
   .get(
     '/images/:id/:size',
-    requireSession,
     immutableRead,
     valid('param', imageParamSchema),
     async (c) => {

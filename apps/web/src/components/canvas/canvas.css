@@ -1,26 +1,179 @@
 /* Maps xyflow's variables onto the site's theme tokens. */
-.canvas-flow {
-  --canvas-recommend: oklch(0.62 0.17 150);
+:root {
+  --canvas-recommend: var(--status-completed);
   --canvas-avoid: var(--destructive);
+}
+
+.canvas-flow {
   --xy-background-color-default: var(--background);
-  --xy-background-pattern-dots-color-default: var(--border);
   --xy-controls-button-background-color-default: var(--card);
-  --xy-controls-button-background-color-hover-default: var(--muted);
+  --xy-controls-button-background-color-hover-default: var(--accent);
   --xy-controls-button-color-default: var(--card-foreground);
+  --xy-controls-button-color-hover-default: var(--accent-foreground);
   --xy-controls-button-border-color-default: var(--border);
-  --xy-handle-background-color-default: var(--background);
-  --xy-handle-border-color-default: var(--muted-foreground);
+  --xy-controls-box-shadow-default: none;
+  --xy-connectionline-stroke-default: var(--star);
+  --xy-connectionline-stroke-width-default: 2;
+  --xy-attribution-background-color-default: transparent;
+  background-image: radial-gradient(ellipse at 50% 0, var(--background-top), var(--background) 70%);
 }
 
-.canvas-flow .canvas-edge-recommend .react-flow__edge-path {
+/* Specks stay on the sky behind everything; they drift slower than the nodes when panning. */
+.canvas-specks {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.2;
+}
+
+.dark .canvas-specks {
+  opacity: 0.55;
+}
+
+/* The atlas plate, light theme only: a printed graticule and a double-ruled frame. */
+.canvas-flow .react-flow__viewport-portal {
+  position: absolute;
+  z-index: -1;
+}
+
+.canvas-graticule {
+  position: absolute;
+  overflow: visible;
+  pointer-events: none;
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.dark .canvas-graticule {
+  display: none;
+}
+
+.canvas-flow::after {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  pointer-events: none;
+  border: 3px double var(--input);
+}
+
+.dark .canvas-flow::after {
+  content: none;
+}
+
+/* The two line types. Besides colour: solid with a star on each end, or dashed with a cross. */
+.canvas-edge-recommend :is(.react-flow__edge-path, line) {
   stroke: var(--canvas-recommend);
-  stroke-width: 2.5;
+  stroke-width: 2;
 }
 
-.canvas-flow .canvas-edge-avoid .react-flow__edge-path {
+.canvas-edge-avoid :is(.react-flow__edge-path, line) {
+  stroke: var(--canvas-avoid);
+  stroke-width: 2;
+  stroke-dasharray: 3 7;
+  stroke-linecap: round;
+}
+
+.canvas-edge-recommend .canvas-mark {
+  fill: var(--star);
+}
+
+.canvas-edge-avoid .canvas-mark {
+  fill: none;
   stroke: var(--canvas-avoid);
   stroke-width: 2.5;
-  stroke-dasharray: 7 5;
+  stroke-linecap: round;
+}
+
+.canvas-mark-backing {
+  fill: var(--background);
+}
+
+/* Only editable lines take focus, so this reaches nothing for visitors or on phones. */
+.canvas-flow .react-flow__edge[tabindex] {
+  cursor: pointer;
+}
+
+.canvas-flow .react-flow__edge[tabindex]:is(:hover, :focus-visible) .react-flow__edge-path {
+  stroke-width: 3.5;
+}
+
+/* Handles: a transparent box with a wider grab area, and a star drawn inside it. */
+.canvas-flow .react-flow__handle {
+  width: 12px;
+  height: 12px;
+  background: transparent;
+  border: 0;
+}
+
+.canvas-flow .react-flow__handle::before {
+  content: '';
+  position: absolute;
+  inset: -6px;
+}
+
+.canvas-flow .react-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--star);
+  clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%);
+  opacity: 0.45;
+  transition: opacity 100ms, scale 100ms;
+}
+
+.canvas-flow .react-flow__node:is(:hover, :focus-within) .react-flow__handle::after,
+.canvas-flow .react-flow__handle.connectingto::after {
+  opacity: 1;
+  scale: 1.6;
+}
+
+/* xyflow's own controls: larger, and 44px where they're tapped. Clears the attribution below. */
+.canvas-flow .react-flow__controls {
+  margin-bottom: 28px;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.canvas-flow .react-flow__controls-button {
+  width: 36px;
+  height: 36px;
+}
+
+.canvas-flow .react-flow__controls-button svg {
+  max-width: 14px;
+  max-height: 14px;
+}
+
+@media (pointer: coarse) {
+  .canvas-flow .react-flow__controls-button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+.canvas-flow .react-flow__attribution {
+  margin: 0 10px 8px;
+}
+
+.canvas-flow .react-flow__attribution a {
+  color: var(--muted-foreground);
+}
+
+/* A held node rises above its neighbours and lifts off the sky. */
+.canvas-flow .react-flow__node.dragging {
+  z-index: 1000 !important;
+}
+
+.canvas-flow .react-flow__node > div {
+  transition: translate 100ms, filter 100ms;
+}
+
+.canvas-flow .react-flow__node.dragging > div {
+  translate: 0 -4px;
+  filter: drop-shadow(0 8px 10px color-mix(in oklab, var(--foreground) 30%, transparent));
 }
 
 /* Played on a node's inner element, so it never fights the transform xyflow puts on the node. */
@@ -50,5 +203,10 @@
   .canvas-bounce,
   .canvas-pop {
     animation: none;
+  }
+
+  .canvas-flow .react-flow__node.dragging > div {
+    translate: none;
+    filter: none;
   }
 }

@@ -242,7 +242,12 @@ export const seriesDateKey = () => {
   return sql<number>`coalesce(${earliest}, 0)`;
 };
 
-const coverColumns = { id: image.id, width: image.width, height: image.height };
+/** A cover's columns. Selected as a nested object over a left join, a missing image is null. */
+export const coverColumns = { id: image.id, width: image.width, height: image.height };
+
+/** Join condition for a series' primary image, for a cover in the same query. */
+export const primaryImageOf = (seriesId: typeof series.id) =>
+  and(eq(image.seriesId, seriesId), eq(image.isPrimary, true));
 
 /** Each series' primary image. */
 async function primaryCovers(db: Reader, seriesIds: readonly string[]) {
