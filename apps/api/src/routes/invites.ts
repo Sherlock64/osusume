@@ -365,14 +365,12 @@ export const inviteRoutes = createRouter()
     const { username, password } = c.req.valid('json');
     const tokenHash = hashToken(token);
 
-    // Before the lookup, so that a dead link takes as long to refuse as a live one takes to accept.
-    const passwordHash = await hashPassword(auth, password);
-
     const [found] = await db
       .select({ email: inviteRequest.inviteeEmail })
       .from(inviteRequest)
       .where(eq(inviteRequest.tokenHash, tokenHash));
     if (!found) throw inviteInvalid();
+    const passwordHash = await hashPassword(auth, password);
 
     // A registered or banned address looks like any other dead link, to everyone.
     let created;

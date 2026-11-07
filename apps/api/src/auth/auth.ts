@@ -74,15 +74,13 @@ export function createAuth({ db, secret, publicBaseUrl, mailer }: AuthOptions) {
       maxPasswordLength: PASSWORD_MAX_LENGTH,
       revokeSessionsOnPasswordReset: true,
       resetPasswordTokenExpiresIn: 60 * 60,
-      // Not awaited: the time an SMTP send takes would reveal whether the account exists.
-      sendResetPassword: ({ user: target, token }) => {
-        void (async () => {
+      sendResetPassword: async ({ user: target, token }) => {
+        try {
           if (await isDisabled(db, target.id)) return;
           await mailer.send(passwordResetMail(publicBaseUrl, target.email, token));
-        })().catch((error: unknown) => {
+        } catch (error) {
           console.error('Sending the password reset email failed:', error);
-        });
-        return Promise.resolve();
+        }
       },
     },
     plugins: [

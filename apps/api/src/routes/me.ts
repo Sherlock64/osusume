@@ -16,11 +16,10 @@ import {
   removeUser,
 } from '../auth/accounts.ts';
 import { emailChangeMail } from '../auth/emails.ts';
-import type { Database } from '../db/client.ts';
 import { emailChangeRequest, inviteRequest, user } from '../db/schema.ts';
 import { ApiError, isUniqueViolation } from '../lib/errors.ts';
 import { lockEmails } from '../lib/locks.ts';
-import { type MailMessage, type Mailer, sendOrFail } from '../lib/mailer.ts';
+import { sendOrFail } from '../lib/mailer.ts';
 import {
   conflict,
   createRouter,
@@ -43,26 +42,6 @@ const requestCompleted = { message: 'Request completed' } as const;
 const requestCompletedContent = {
   'application/json': { schema: requestCompletedResponseSchema },
 };
-
-/**
- * Not awaited, and failures are not reported: the time an SMTP send takes, or its failing, would
- * tell a non-admin the address was not refused. A link that could not be sent is dropped.
- */
-function sendLinkInBackground(
-  db: Database,
-  mailer: Mailer,
-  message: MailMessage,
-  tokenHash: string,
-): void {
-  void mailer.send(message).catch(async (error: unknown) => {
-    console.error('Sending the email change link failed:', error);
-    try {
-      await db.delete(emailChangeRequest).where(eq(emailChangeRequest.tokenHash, tokenHash));
-    } catch (deleteError) {
-      console.error('Dropping the unsent email change link failed:', deleteError);
-    }
-  });
-}
 
 const deleteAccountRoute = createRoute({
   method: 'delete',
@@ -149,10 +128,9 @@ export const meRoutes = createRouter()
 
     const isAdmin = c.var.currentUser.role === 'admin';
     const token = generateToken();
-    const tokenHash = hashToken(token);
     const values = {
       newEmail,
-      tokenHash,
+      tokenHash: hashToken(token),
       expiresAt: new Date(Date.now() + EMAIL_CHANGE_LINK_LIFETIME_MS),
     };
     const mail = emailChangeMail(publicBaseUrl, newEmail, token);
@@ -164,14 +142,14 @@ export const meRoutes = createRouter()
           .insert(emailChangeRequest)
           .values({ userId, ...values })
           .onConflictDoUpdate({ target: emailChangeRequest.userId, set: values });
-        // An admin hears about a failure, which rolls this back.
-        if (isAdmin) await sendOrFail(mailer, mail);
+        // A failure rolls this back, so the link that could not be sent is dropped.
+        await sendOrFail(mailer, mail);
       });
     } catch (error) {
-      if (!isAddressRefusal(error) || isAdmin) throw error;
-      return c.json(requestCompleted, 200);
+      const hidden =
+        isAddressRefusal(error) || (error instanceof ApiError && error.code === 'email_failed');
+      if (!hidden || isAdmin) throw error;
     }
-    if (!isAdmin) sendLinkInBackground(db, mailer, mail, tokenHash);
     return c.json(requestCompleted, 200);
   })
   .openapi(verifyEmailChangeRoute, async (c) => {

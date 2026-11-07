@@ -11,16 +11,10 @@ export interface RateLimitRule {
 /** Matches Better Auth's rule for its own password endpoints. */
 export const PASSWORD_CHECK_LIMIT: RateLimitRule = { windowSeconds: 10, max: 3 };
 
-/**
- * Enough to invite a group of friends in one sitting, and too few requests to average out the
- * small timing difference between a refused address and one that goes ahead.
- */
+/** Enough to invite a group of friends in one sitting. */
 export const INVITE_REQUEST_LIMIT: RateLimitRule = { windowSeconds: 60 * 60, max: 10 };
 
-/**
- * Accepting an invite hashes the password before anything else and needs no login, so this keeps
- * one client from using up the workers that hash. Enough for a person retrying a form.
- */
+/** Accepting an invite needs no login, so this keeps one client from flooding it. */
 export const INVITE_ACCEPT_LIMIT: RateLimitRule = { windowSeconds: 60, max: 10 };
 
 const windows = new Map<string, { expiresAt: number; count: number }>();

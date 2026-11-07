@@ -439,7 +439,7 @@ describe('POST /admin/invite-requests/{id}/revoke', () => {
 });
 
 describe('POST /invites/{token}/accept', () => {
-  it('hashes the password even for a dead link', async () => {
+  it('does not hash the password for a dead link', async () => {
     const hash = vi.spyOn((await t.auth.$context).password, 'hash');
     try {
       const response = await t.request('POST', '/api/v1/invites/not-a-real-token/accept', {
@@ -447,7 +447,7 @@ describe('POST /invites/{token}/accept', () => {
         password: PASSWORD,
       });
       expectError(response, 404, 'invite_invalid');
-      expect(hash).toHaveBeenCalledTimes(1);
+      expect(hash).not.toHaveBeenCalled();
     } finally {
       hash.mockRestore();
     }
@@ -767,14 +767,11 @@ describe('accepting an invite, rate limited', () => {
       { ip },
     );
 
-  it('stops hashing for a client at its limit, and leaves other clients alone', async () => {
+  it('refuses a client at its limit, and leaves other clients alone', async () => {
     for (let count = 0; count < INVITE_ACCEPT_LIMIT.max; count += 1) {
       expectError(await attempt('203.0.113.7'), 404, 'invite_invalid');
     }
-    const hash = vi.spyOn((await t.auth.$context).password, 'hash');
     expectError(await attempt('203.0.113.7'), 429, 'rate_limited');
-    expect(hash).not.toHaveBeenCalled();
-    hash.mockRestore();
     expectError(await attempt('203.0.113.8'), 404, 'invite_invalid');
   });
 });
