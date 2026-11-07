@@ -7,8 +7,9 @@ import {
 } from '@osusume/shared';
 import { and, asc, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
+import { coverColumns, primaryImageOf } from '../catalog/entries.ts';
 import type { Database } from '../db/client.ts';
-import { friendship, listEntry, listSettings, season, series, user } from '../db/schema.ts';
+import { friendship, image, listEntry, listSettings, season, series, user } from '../db/schema.ts';
 import { ApiError } from '../lib/errors.ts';
 import { type Cursor, keyset, toPage } from '../lib/pagination.ts';
 
@@ -148,8 +149,9 @@ export async function loadListPage(
   const { limit, status } = query;
   const page = keyset({ sortColumn: series.title, idColumn: series.id, cursor: query.cursor });
   const seriesRows = await db
-    .select({ id: series.id, title: series.title })
+    .select({ id: series.id, title: series.title, cover: coverColumns })
     .from(series)
+    .leftJoin(image, primaryImageOf(series.id))
     .where(
       and(
         exists(
@@ -203,6 +205,7 @@ export async function loadListPage(
       return {
         seriesId: row.id,
         title: row.title,
+        cover: row.cover,
         seriesStatus: deriveSeriesStatus(
           seasons.map((entry) => entry.entry.status),
           totalOf.get(row.id) ?? seasons.length,

@@ -4,8 +4,9 @@ import {
   parseCompareUsernames,
   usernameKey,
 } from '@osusume/shared';
-import { asc, eq, inArray } from 'drizzle-orm';
-import { listEntry, season, series } from '../db/schema.ts';
+import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm';
+import { coverColumns, primaryImageOf } from '../catalog/entries.ts';
+import { image, listEntry, season, series } from '../db/schema.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
 import { canView, loadListRefs, loadViewer } from '../social/lists.ts';
@@ -40,10 +41,19 @@ export const compareRoutes = createRouter().get('/compare', requireSession, vali
       seriesTitle: series.title,
       seasonTitle: season.title,
       ordinal: season.ordinal,
+      cover: coverColumns,
     })
     .from(listEntry)
     .innerJoin(season, eq(listEntry.seasonId, season.id))
     .innerJoin(series, eq(season.seriesId, series.id))
+    // The season's own cover, else its series' primary, as the season detail shows it.
+    .leftJoin(
+      image,
+      or(
+        eq(image.id, season.coverImageId),
+        and(isNull(season.coverImageId), primaryImageOf(series.id)),
+      ),
+    )
     .where(
       inArray(
         listEntry.userId,
@@ -77,6 +87,7 @@ export const compareRoutes = createRouter().get('/compare', requireSession, vali
       seriesTitle: first.seriesTitle,
       seasonTitle: first.seasonTitle,
       ordinal: first.ordinal,
+      cover: first.cover,
       on,
       statuses,
     });

@@ -1,4 +1,5 @@
 import { eq, or } from 'drizzle-orm';
+import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { friendship, listEntry, listSettings } from '../db/schema.ts';
 import { encodeCursor } from '../lib/pagination.ts';
@@ -72,9 +73,18 @@ async function befriend(a: { cookie: string }, b: { cookie: string; enteredUsern
   await t.request('POST', `/api/v1/friends/requests/${id}/accept`, undefined, { cookie: b.cookie });
 }
 
+/** Uploads a cover into a series' catalog; the first one becomes its primary. */
+async function addCover(seriesId: string) {
+  const png = await sharp({ create: { width: 60, height: 90, channels: 3, background: 'teal' } }).png().toBuffer();
+  const response = await t.upload(seriesId, png, { cookie: admin.cookie });
+  expect(response.status).toBe(201);
+  return response.body as { id: string; width: number; height: number };
+}
+
 interface ListBody {
   items: {
     seriesId: string;
+    cover: { id: string; width: number; height: number } | null;
     seriesStatus: { status: string; label: string; count: number; totalSeasons: number };
     seasons: { seasonId: string; status: string; matched: boolean; note?: string | null }[];
   }[];
@@ -142,6 +152,21 @@ describe('the watch list', () => {
       totalSeasons: 3,
       label: 'Completed 2/3 seasons',
     });
+  });
+
+  it("carries each series' primary cover on the own and member lists", async () => {
+    const owner = await t.seedLoggedIn();
+    const viewer = await t.seedLoggedIn();
+    await setVisibility(owner.cookie, 'members');
+    const covered = await seedSeries(1, 'A covered');
+    const bare = await seedSeries(1, 'B bare');
+    const { id, width, height } = await addCover(covered.id);
+    await put(owner.cookie, covered.seasonIds[0] ?? '', { status: 'watching' });
+    await put(owner.cookie, bare.seasonIds[0] ?? '', { status: 'watching' });
+    for (const response of [await myList(owner.cookie), await memberList(viewer.cookie, owner.enteredUsername)]) {
+      const body = response.body as ListBody;
+      expect(body.items.map((item) => item.cover)).toEqual([{ id, width, height }, null]);
+    }
   });
 
   it('filters by any season, shows all of the series and marks the matching seasons', async () => {
@@ -328,14 +353,15 @@ describe('who can see a list', () => {
 describe('a public list', () => {
   async function publicOwner() {
     const owner = await t.seedLoggedIn();
-    const { seasonIds } = await seedSeries(2, 'Public Series');
+    const { id, seasonIds } = await seedSeries(2, 'Public Series');
+    const cover = await addCover(id);
     await put(owner.cookie, seasonIds[0] ?? '', { status: 'completed', note: SECRET_NOTE });
     const settings = await setVisibility(owner.cookie, 'public');
-    return { owner, slug: settings.publicSlug ?? '' };
+    return { owner, slug: settings.publicSlug ?? '', cover };
   }
 
-  it('shows titles and status only, with no login, unindexed and uncached', async () => {
-    const { owner, slug } = await publicOwner();
+  it('shows titles, covers and status only, with no login, unindexed and uncached', async () => {
+    const { owner, slug, cover } = await publicOwner();
     expect(slug.length).toBeGreaterThanOrEqual(32);
     const response = await publicList(slug);
     expect(response.status).toBe(200);
@@ -343,6 +369,7 @@ describe('a public list', () => {
       items: [
         {
           title: 'Public Series',
+          cover: { id: cover.id, width: cover.width, height: cover.height },
           seriesStatus: {
             status: 'completed',
             count: 1,
