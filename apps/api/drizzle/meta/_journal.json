@@ -78,6 +78,13 @@
       "when": 1794099726364,
       "tag": "0010_series_rating",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794116368605,
+      "tag": "0011_canvas_group",
+      "breakpoints": true
     }
   ]
 }

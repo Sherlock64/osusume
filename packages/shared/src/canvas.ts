@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { coverSchema } from './catalog.ts';
+import { SEARCH_QUERY_MAX_LENGTH, coverSchema } from './catalog.ts';
 import { seriesRatingSchema } from './social.ts';
 
 /** 'recommend' means the two series go together, 'avoid' that they do not. */
@@ -8,6 +8,10 @@ export const canvasLinkKindSchema = z.enum(canvasLinkKinds);
 export type CanvasLinkKind = z.infer<typeof canvasLinkKindSchema>;
 
 export const CANVAS_POSITIONS_MAX = 1000;
+export const CANVAS_SEARCH_LIMIT = 20;
+export const CANVAS_GROUP_NAME_MAX = 60;
+
+const groupNameSchema = z.string().trim().min(1).max(CANVAS_GROUP_NAME_MAX);
 
 /** Far beyond any real drag. Past about 1e18, the layout's grid loop in the web app never ends. */
 export const CANVAS_COORDINATE_MAX = 1_000_000;
@@ -23,6 +27,8 @@ export const canvasNodeSchema = z.object({
   y: z.number().nullable(),
   /** The owner's rating of the series, the default until they rate it. */
   rating: seriesRatingSchema,
+  /** The owner's group the series is in, if any. */
+  groupId: z.uuid().nullable(),
 });
 export type CanvasNode = z.infer<typeof canvasNodeSchema>;
 
@@ -34,9 +40,14 @@ export const canvasLinkSchema = z.object({
 });
 export type CanvasLink = z.infer<typeof canvasLinkSchema>;
 
+export const canvasGroupSchema = z.object({ id: z.uuid(), name: z.string() });
+export type CanvasGroup = z.infer<typeof canvasGroupSchema>;
+
 export const canvasResponseSchema = z.object({
   nodes: z.array(canvasNodeSchema),
   links: z.array(canvasLinkSchema),
+  /** Only groups with a member among `nodes`, by name then id. */
+  groups: z.array(canvasGroupSchema),
 });
 export type CanvasResponse = z.infer<typeof canvasResponseSchema>;
 
@@ -53,3 +64,10 @@ export const deleteCanvasLinkQuerySchema = z.object({
   seriesAId: z.uuid(),
   seriesBId: z.uuid(),
 });
+
+export const canvasSearchQuerySchema = z.object({ q: z.string().trim().min(1).max(SEARCH_QUERY_MAX_LENGTH) });
+export const canvasSearchResponseSchema = z.object({ seriesIds: z.array(z.uuid()) });
+export const postCanvasGroupSchema = z.object({ name: groupNameSchema, seriesId: z.uuid() });
+export const patchCanvasGroupSchema = z.object({ name: groupNameSchema });
+export const canvasGroupParamSchema = z.object({ groupId: z.uuid() });
+export const canvasGroupSeriesParamSchema = z.object({ groupId: z.uuid(), seriesId: z.uuid() });

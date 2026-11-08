@@ -553,3 +553,38 @@ export const canvasLink = pgTable(
     check('canvas_link_ordered_pair', sql`${t.seriesLowId} < ${t.seriesHighId}`),
   ],
 );
+
+/** A named group of series on its owner's canvas. Deleted with its last member. */
+export const canvasGroup = pgTable(
+  'canvas_group',
+  {
+    id: primaryId(),
+    userId: uuid()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    name: text().notNull(),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [index('canvas_group_user_id_idx').on(t.userId)],
+);
+
+/** One group per series per user: the primary key enforces it. Kept when the series leaves the list. */
+export const canvasGroupMember = pgTable(
+  'canvas_group_member',
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    seriesId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
+    groupId: uuid()
+      .notNull()
+      .references(() => canvasGroup.id, { onDelete: 'cascade' }),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.seriesId] }),
+    index('canvas_group_member_group_id_idx').on(t.groupId),
+  ],
+);
