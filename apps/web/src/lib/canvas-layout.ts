@@ -120,6 +120,29 @@ export function groupBox(members: readonly Point[]): Rect | null {
   return box && pad(box);
 }
 
+/** Where a title's plate starts under its node (star, gap, plate padding and outline), and its line height. */
+const TITLE_TOP = 155;
+const TITLE_LINE = 30;
+const TITLE_CHARS_PER_LINE = 13;
+
+/** Lines a title wraps to under its star, erring high; wide (CJK) characters count double. */
+export function titleLines(title: string): number {
+  const width = title.length + (title.match(/[\u2e80-\uffff]/g)?.length ?? 0);
+  return Math.min(3, Math.max(1, Math.ceil(width / TITLE_CHARS_PER_LINE)));
+}
+
+/**
+ * The box as drawn: groupBox with its bottom pulled up to the lowest title plus GROUP_PADDING, since the
+ * footprint reserves three title lines. Never larger than groupBox, so the overlap rules still hold.
+ * shortcut: titles are measured by character count, not the DOM; measure the plates if boxes clip titles.
+ */
+export function drawnGroupBox(members: readonly (Point & { title: string })[]): Rect | null {
+  const box = groupBox(members);
+  if (!box) return null;
+  const bottom = Math.max(...members.map((m) => m.y + TITLE_TOP + TITLE_LINE * titleLines(m.title))) + GROUP_PADDING;
+  return { ...box, height: Math.min(box.height, bottom - box.y) };
+}
+
 export interface LayoutState {
   positions: ReadonlyMap<string, Point>;
   groupOf: ReadonlyMap<string, string>;

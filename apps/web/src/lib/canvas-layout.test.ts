@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   footprint,
+  drawnGroupBox,
   groupBox,
   NODE_HEIGHT,
   NODE_WIDTH,
@@ -87,6 +88,13 @@ describe('footprint and overlaps', () => {
   it('pads a group box and is null when empty', () => {
     expect(groupBox([])).toBeNull();
     expect(groupBox([{ x: 48, y: 24 }])).toEqual({ x: -24, y: 0, width: 272, height: 284 });
+  });
+
+  it('draws the box down to the lowest title only, never past groupBox', () => {
+    expect(drawnGroupBox([])).toBeNull();
+    // One line: 24 above the star, 24 below its plate (155 + 30).
+    expect(drawnGroupBox([{ x: 48, y: 24, title: 'Bleach' }])).toEqual({ x: -24, y: 0, width: 272, height: 233 });
+    expect(drawnGroupBox([{ x: 48, y: 24, title: 'A'.repeat(60) }])).toEqual(groupBox([{ x: 48, y: 24 }]));
   });
 });
 

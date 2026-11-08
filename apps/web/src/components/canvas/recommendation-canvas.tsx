@@ -31,6 +31,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
+  drawnGroupBox,
   groupBox,
   nudgeGroup,
   nudgeSeries,
@@ -60,7 +61,7 @@ interface RecommendationCanvasProps {
 }
 
 type OpenMenu =
-  | { type: 'connect'; x: number; y: number; seriesAId: string; seriesBId: string }
+  | { type: 'connect'; x: number; y: number; seriesAId: string; seriesBId: string; from: HTMLElement | null }
   | { type: 'edge'; x: number; y: number; link: CanvasLink; from: SVGElement | null }
   | { type: 'node'; x: number; y: number; seriesId: string; from: HTMLElement | null; step: 'main' | 'link' | 'group' }
   | { type: 'group'; x: number; y: number; groupId: string; from: HTMLElement | null; step: 'main' | 'add' | 'rename' };
@@ -145,6 +146,7 @@ function Guidance({ editable, coarse, hasLinks }: { editable: boolean; coarse: b
           <li>Drag a series to move it. Click it to open it.</li>
           <li>Drag from a star on its edge onto another series to draw a line, then pick the type.</li>
           <li>Click a line to change or remove it.</li>
+          <li>Right-click a series (or Shift+F10) to link it or start a group. Drag a group by its name; right-click the name for more.</li>
         </ol>
       </details>
     );
@@ -211,17 +213,30 @@ function SearchCard({
   onHighlight: (seriesId: string | null) => void;
 }) {
   const { setCenter, getZoom, getNode } = useReactFlow();
+  const domNode = useStore((state) => state.domNode);
   return (
     <ConstellationsCard
       {...props}
       onFocus={(seriesId) => {
         onHighlight(seriesId);
         const node = seriesId === null ? undefined : getNode(seriesId);
-        if (!node) return;
+        if (!node || !domNode) return;
+        // shortcut: the card reports typing and picks alike, so only a click on a result (focus on it) counts as a pick, not Enter.
+        const picked = !props.compact && document.activeElement?.closest('.react-flow__panel li') != null;
+        const zoom = Math.max(getZoom(), 0.75);
+        // On a phone the open card covers the top of the map: centre the match in the part below it.
+        const card = props.compact ? document.querySelector('[data-map-card]') : null;
+        const covered = card ? card.getBoundingClientRect().bottom - domNode.getBoundingClientRect().top : 0;
         const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-        void setCenter(node.position.x + STAR_SIZE / 2, node.position.y + STAR_SIZE / 2, {
-          zoom: Math.max(getZoom(), 0.75),
+        void setCenter(node.position.x + STAR_SIZE / 2, node.position.y + STAR_SIZE / 2 - covered / 2 / zoom, {
+          zoom,
           duration: still ? 0 : 400,
+        }).then(() => {
+          // Keyboard users land on the bubble, so Shift+F10 opens its menu straight away.
+          if (picked)
+            domNode
+              .querySelector<HTMLElement>(`.react-flow__node[data-id="${CSS.escape(node.id)}"] a`)
+              ?.focus({ preventScroll: true });
         });
       }}
     />
@@ -234,7 +249,7 @@ function NameForm({ initial, submitLabel, onSubmit }: { initial: string; submitL
   const [name, setName] = useState(initial);
   return (
     <form
-      className="flex flex-col gap-2 p-1"
+      className="flex flex-col gap-2 px-2 pt-1"
       onSubmit={(event) => {
         event.preventDefault();
         if (name.trim() !== '') onSubmit(name.trim());
@@ -354,7 +369,11 @@ export function RecommendationCanvas({
   const groupNodes = useMemo(
     () =>
       groups.flatMap((group): GroupFlowNode[] => {
-        const box = groupBox(nodes.filter((node) => groupOf.get(node.id) === group.id).map((node) => node.position));
+        const box = drawnGroupBox(
+          nodes
+            .filter((node) => groupOf.get(node.id) === group.id)
+            .map((node) => ({ ...node.position, title: node.data.title })),
+        );
         if (!box) return [];
         const id = GROUP_PREFIX + group.id;
         return [
@@ -451,7 +470,7 @@ export function RecommendationCanvas({
       state.toNode?.id ??
       document.elementFromPoint(point.x, point.y)?.closest<HTMLElement>('.react-flow__node')?.dataset.id;
     if (from === undefined || to === undefined || from === to) return;
-    setMenu({ type: 'connect', ...point, seriesAId: from, seriesBId: to });
+    setMenu({ type: 'connect', ...point, seriesAId: from, seriesBId: to, from: null });
   };
 
   const chooseKind = (kind: CanvasLinkKind) => {
@@ -578,7 +597,7 @@ export function RecommendationCanvas({
           x={menu.x}
           y={menu.y}
           // One menu for every step, so going from Link to… to the kind picker doesn't close it.
-          returnFocusTo={menu.type === 'connect' ? null : menu.from}
+          returnFocusTo={menu.from}
           onDismiss={() => {
             setMenu(null);
           }}
@@ -644,16 +663,18 @@ export function RecommendationCanvas({
             </>
           )}
           {menu.type === 'node' && menu.step === 'link' && (
-            <MapSearch
-              username={username}
-              nodes={seriesNodes}
-              label="Link to"
-              exclude={new Set([menu.seriesId])}
-              autoFocus
-              onPick={(seriesBId) => {
-                setMenu({ type: 'connect', x: menu.x, y: menu.y, seriesAId: menu.seriesId, seriesBId });
-              }}
-            />
+            <div className="px-2 pt-1">
+              <MapSearch
+                username={username}
+                nodes={seriesNodes}
+                label="Link to"
+                exclude={new Set([menu.seriesId])}
+                autoFocus
+                onPick={(seriesBId) => {
+                  setMenu({ type: 'connect', x: menu.x, y: menu.y, seriesAId: menu.seriesId, seriesBId, from: menu.from });
+                }}
+              />
+            </div>
           )}
           {menu.type === 'node' && menu.step === 'group' && (
             <NameForm
@@ -681,7 +702,8 @@ export function RecommendationCanvas({
               >
                 Rename…
               </MenuItem>
-              <div className="flex flex-col [&>button]:justify-start">
+              {/* A ghost item like its neighbours; the dialog it opens keeps the danger styling. */}
+              <div className="[&>button]:hover:bg-destructive/10 flex flex-col [&>button]:justify-start [&>button]:border-transparent [&>button]:bg-transparent">
                 <ConfirmButton
                   label="Delete group"
                   title={`Delete ${menuGroup.name}?`}
@@ -695,20 +717,22 @@ export function RecommendationCanvas({
             </>
           )}
           {menu.type === 'group' && menuGroup && menu.step === 'add' && (
-            <MapSearch
-              username={username}
-              nodes={seriesNodes}
-              label={`Add to ${menuGroup.name}`}
-              exclude={new Set(seriesNodes.filter((node) => node.groupId === menuGroup.id).map((node) => node.seriesId))}
-              autoFocus
-              onPick={(seriesId) => {
-                const groupOfAfter = new Map(groupOf).set(seriesId, menuGroup.id);
-                const position = placeInGroup({ ...layout(), groupOf: groupOfAfter }, seriesId, menuGroup.id);
-                setSlid(new Set([seriesId, GROUP_PREFIX + menuGroup.id]));
-                onAddToGroup(menuGroup.id, seriesId, position);
-                setMenu(null);
-              }}
-            />
+            <div className="px-2 pt-1">
+              <MapSearch
+                username={username}
+                nodes={seriesNodes}
+                label={`Add to ${menuGroup.name}`}
+                exclude={new Set(seriesNodes.filter((node) => node.groupId === menuGroup.id).map((node) => node.seriesId))}
+                autoFocus
+                onPick={(seriesId) => {
+                  const groupOfAfter = new Map(groupOf).set(seriesId, menuGroup.id);
+                  const position = placeInGroup({ ...layout(), groupOf: groupOfAfter }, seriesId, menuGroup.id);
+                  setSlid(new Set([seriesId, GROUP_PREFIX + menuGroup.id]));
+                  onAddToGroup(menuGroup.id, seriesId, position);
+                  setMenu(null);
+                }}
+              />
+            </div>
           )}
           {menu.type === 'group' && menuGroup && menu.step === 'rename' && (
             <NameForm

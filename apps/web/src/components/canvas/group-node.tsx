@@ -19,11 +19,10 @@ const PLATE =
 /** A constellation: a hairline box around its members, named on its top edge. Only the name takes the pointer. */
 export function GroupNode({ data }: NodeProps<GroupFlowNode>) {
   return (
-    <div className="canvas-group border-star/40 bg-star/5 relative size-full rounded-2xl border">
+    <div className="canvas-group border-star/40 bg-star/5 dark:bg-star/[0.025] relative size-full rounded-2xl border">
       {data.interactive ?
         <button
           type="button"
-          aria-haspopup="menu"
           aria-label={`${data.name}, group. Drag to move it, press Enter for its menu.`}
           className={`${GROUP_HANDLE} ${PLATE} focus-visible:ring-ring cursor-grab focus-visible:ring-2 active:cursor-grabbing`}
         >
