@@ -175,6 +175,19 @@ describe('placeInGroup', () => {
     expect(rectsOverlap(box(moved, 'g'), footprint({ x: 0, y: 300 }))).toBe(false);
     expect(Math.hypot(p.x - 150, p.y)).toBeLessThan(700);
   });
+
+  it('never stacks members in a crowded grid where no refitted box fits', () => {
+    const positions: Record<string, Point> = {};
+    for (let i = 0; i < 64; i++) positions[`s${String(i)}`] = { x: (i % 8) * 250, y: Math.floor(i / 8) * 260 };
+    const groupOf: Record<string, string> = { s27: 'g' };
+    for (const id of ['n1', 'n2']) {
+      positions[id] = { x: 9000, y: 9000 };
+      groupOf[id] = 'g';
+      const s = state(positions, groupOf);
+      positions[id] = placeInGroup(s, id, 'g');
+      expect(clearOfBubbles(state(positions, groupOf), id, positions[id])).toBe(true);
+    }
+  });
 });
 
 describe('placeNodes with obstacles', () => {

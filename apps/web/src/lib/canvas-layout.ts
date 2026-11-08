@@ -148,8 +148,8 @@ export interface LayoutState {
   groupOf: ReadonlyMap<string, string>;
 }
 
-/** Rings of growing radius around `start`, nearest first; the first sample `isFree` accepts, else `start`. */
-function nearestFree(start: Point, isFree: (p: Point) => boolean): Point {
+/** Rings of growing radius around `start`, nearest first; the first sample `isFree` accepts, else null. */
+function nearestFree(start: Point, isFree: (p: Point) => boolean): Point | null {
   if (isFree(start)) return start;
   for (let radius = RING_STEP; radius <= MAX_RADIUS; radius += RING_STEP) {
     const samples = Math.ceil((2 * Math.PI * radius) / RING_STEP);
@@ -159,7 +159,7 @@ function nearestFree(start: Point, isFree: (p: Point) => boolean): Point {
       if (isFree(p)) return p;
     }
   }
-  return start;
+  return null;
 }
 
 /** Member positions of every group, optionally leaving one series out. */
@@ -212,9 +212,22 @@ function seriesFreeTest(state: LayoutState, seriesId: string): (p: Point) => boo
   };
 }
 
+/**
+ * Nearest spot passing the full feature 3 test; failing that (a crowded group box can't fit anywhere),
+ * the nearest spot where at least the bubble itself overlaps no other bubble.
+ */
+function nearestSeriesSpot(state: LayoutState, seriesId: string, start: Point): Point {
+  const bubbles = outsiderFootprints(state, undefined, seriesId);
+  return (
+    nearestFree(start, seriesFreeTest(state, seriesId)) ??
+    nearestFree(start, (p) => !hitsAny(footprint(p), bubbles)) ??
+    start
+  );
+}
+
 /** Where a bubble dropped at `drop` ends up (feature 3 rules). */
 export function nudgeSeries(state: LayoutState, seriesId: string, drop: Point): Point {
-  return nearestFree(drop, seriesFreeTest(state, seriesId));
+  return nearestSeriesSpot(state, seriesId, drop);
 }
 
 /** The delta a group dragged by `delta` ends up moving by. */
@@ -224,10 +237,12 @@ export function nudgeGroup(state: LayoutState, groupId: string, delta: Point): P
   if (!box) return delta;
   const outsiders = outsiderFootprints(state, groupId);
   const boxes = otherGroupBoxes(groups, groupId);
-  return nearestFree(delta, (d) => {
-    const moved = { ...box, x: box.x + d.x, y: box.y + d.y };
-    return !hitsAny(moved, outsiders) && !hitsAny(moved, boxes);
-  });
+  return (
+    nearestFree(delta, (d) => {
+      const moved = { ...box, x: box.x + d.x, y: box.y + d.y };
+      return !hitsAny(moved, outsiders) && !hitsAny(moved, boxes);
+    }) ?? delta
+  );
 }
 
 /** Where a series just added to `groupId` goes: nearest free spot to the group's box centre. */
@@ -239,5 +254,5 @@ export function placeInGroup(state: LayoutState, seriesId: string, groupId: stri
         y: Math.round(box.y + box.height / 2 - NODE_HEIGHT / 2),
       }
     : (state.positions.get(seriesId) ?? { x: 0, y: 0 });
-  return nearestFree(start, seriesFreeTest(state, seriesId));
+  return nearestSeriesSpot(state, seriesId, start);
 }
