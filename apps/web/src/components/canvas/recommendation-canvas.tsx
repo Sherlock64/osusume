@@ -1,4 +1,4 @@
-import type { CanvasLink, CanvasLinkKind, CanvasNode } from '@osusume/shared';
+import { SERIES_RATING_DEFAULT, type CanvasLink, type CanvasLinkKind, type CanvasNode } from '@osusume/shared';
 import {
   applyNodeChanges,
   ConnectionMode,
@@ -188,6 +188,7 @@ export function RecommendationCanvas({
           seriesId: position.seriesId,
           title: node?.title ?? '',
           cover: node?.cover ?? null,
+          rating: node?.rating ?? SERIES_RATING_DEFAULT,
           interactive,
           popIn: popped.has(position.seriesId),
         },

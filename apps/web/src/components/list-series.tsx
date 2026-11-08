@@ -1,7 +1,8 @@
-import { type Cover, type ListStatus, type SeasonOfYear } from '@osusume/shared';
+import { type Cover, type ListStatus, type SeasonOfYear, type SeriesRating } from '@osusume/shared';
 import { Link } from '@tanstack/react-router';
 import { CoverImage } from '@/components/cover-image';
 import { StatusMenu } from '@/components/list-entry-editor';
+import { RatingPicker } from '@/components/star-rating';
 import { StatusBadge } from '@/components/status-badge';
 import { formatAired } from '@/lib/catalog-format';
 import { cn } from '@/lib/utils';
@@ -11,6 +12,8 @@ interface ListedSeries {
   title: string;
   cover: Cover | null;
   seriesStatus: { label: string };
+  /** Only the owner's own list has a rating to set. */
+  rating?: SeriesRating;
   seasons: {
     seasonId: string;
     title: string;
@@ -44,6 +47,9 @@ export function ListSeries({ series }: { series: ListedSeries }) {
           </Link>
         </h2>
         <p className="text-muted-foreground text-sm">{series.seriesStatus.label}</p>
+        {series.rating !== undefined && (
+          <RatingPicker seriesId={series.seriesId} rating={series.rating} title={series.title} />
+        )}
         <ul className="mt-2 flex flex-col gap-1.5">
           {series.seasons.map((season) => {
             const aired = formatAired(season.year, season.seasonOfYear);
