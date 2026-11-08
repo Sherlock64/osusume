@@ -166,13 +166,31 @@ async function deleteGroupIfEmpty(tx: Transaction, groupId: string) {
     );
 }
 
-/** Puts the series in the group, out of any old one, which goes if now empty. */
+/**
+ * Puts the series in the user's own group, out of any old one, which goes if now empty.
+ * Locks the new and old groups in id order, then the membership, so concurrent moves
+ * neither deadlock nor delete a group another move just joined.
+ */
 async function joinGroup(tx: Transaction, userId: string, seriesId: string, groupId: string) {
-  const [old] = await tx
-    .select({ groupId: canvasGroupMember.groupId })
-    .from(canvasGroupMember)
-    .where(and(eq(canvasGroupMember.userId, userId), eq(canvasGroupMember.seriesId, seriesId)))
-    .for('update');
+  const membership = and(eq(canvasGroupMember.userId, userId), eq(canvasGroupMember.seriesId, seriesId));
+  let old: { groupId: string } | undefined;
+  for (;;) {
+    [old] = await tx.select({ groupId: canvasGroupMember.groupId }).from(canvasGroupMember).where(membership);
+    const locked = await tx
+      .select({ id: canvasGroup.id })
+      .from(canvasGroup)
+      .where(and(inArray(canvasGroup.id, [groupId, old?.groupId ?? groupId]), eq(canvasGroup.userId, userId)))
+      .orderBy(asc(canvasGroup.id))
+      .for('update');
+    if (!locked.some((row) => row.id === groupId)) throw groupNotFound();
+    const [now] = await tx
+      .select({ groupId: canvasGroupMember.groupId })
+      .from(canvasGroupMember)
+      .where(membership)
+      .for('update');
+    // A move that committed before our locks changed the old group: lock that one instead
+    if (now?.groupId === old?.groupId) break;
+  }
   await tx
     .insert(canvasGroupMember)
     .values({ userId, seriesId, groupId })
@@ -266,7 +284,6 @@ export const canvasRoutes = createRouter()
       const userId = c.var.currentUser.id;
       const { groupId, seriesId } = c.req.valid('param');
       await c.var.deps.db.transaction(async (tx) => {
-        await lockOwnGroup(tx, userId, groupId);
         await assertOnCanvas(tx, userId, seriesId);
         await joinGroup(tx, userId, seriesId, groupId);
       });
