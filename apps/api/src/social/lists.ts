@@ -1,5 +1,7 @@
 import {
+  SERIES_RATING_DEFAULT,
   type ListQuery,
+  type SeriesRating,
   type ListStatus,
   type VisibilityTier,
   listStatusLabels,
@@ -9,7 +11,16 @@ import { and, asc, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
 import { coverColumns, primaryImageOf } from '../catalog/entries.ts';
 import type { Database } from '../db/client.ts';
-import { friendship, image, listEntry, listSettings, season, series, user } from '../db/schema.ts';
+import {
+  friendship,
+  image,
+  listEntry,
+  listSettings,
+  season,
+  series,
+  seriesRating,
+  user,
+} from '../db/schema.ts';
 import { ApiError } from '../lib/errors.ts';
 import { type Cursor, keyset, toPage } from '../lib/pagination.ts';
 
@@ -136,22 +147,27 @@ export function deriveSeriesStatus(statuses: readonly ListStatus[], totalSeasons
   };
 }
 
+/** The owner's rating of a series, left joined, or the default for one never rated. */
+export const ratingOrDefault = sql<number>`coalesce(${seriesRating.rating}, ${SERIES_RATING_DEFAULT})`;
+
 /**
  * A page of a user's list, one item per series, by title. A series is in the page if any of its
  * seasons on the list has the status asked for. Each item still holds all its seasons on the
- * list and its status comes from all of them, with `matched` marking the ones that matched.
+ * list and its status comes from all of them, with `matched` marking the ones that matched. A
+ * rating, given only for the owner's own list, keeps series with that rating.
  */
 export async function loadListPage(
   db: Database,
   ownerId: string,
-  query: Omit<ListQuery, 'cursor'> & { cursor: Cursor<string> | undefined },
+  query: Omit<ListQuery, 'cursor'> & { cursor: Cursor<string> | undefined; rating?: SeriesRating },
 ) {
-  const { limit, status } = query;
+  const { limit, status, rating } = query;
   const page = keyset({ sortColumn: series.title, idColumn: series.id, cursor: query.cursor });
   const seriesRows = await db
-    .select({ id: series.id, title: series.title, cover: coverColumns })
+    .select({ id: series.id, title: series.title, cover: coverColumns, rating: ratingOrDefault })
     .from(series)
     .leftJoin(image, primaryImageOf(series.id))
+    .leftJoin(seriesRating, and(eq(seriesRating.seriesId, series.id), eq(seriesRating.userId, ownerId)))
     .where(
       and(
         exists(
@@ -167,6 +183,7 @@ export async function loadListPage(
               ),
             ),
         ),
+        rating === undefined ? undefined : eq(ratingOrDefault, rating),
         page.where,
       ),
     )
@@ -206,6 +223,7 @@ export async function loadListPage(
         seriesId: row.id,
         title: row.title,
         cover: row.cover,
+        rating: row.rating,
         seriesStatus: deriveSeriesStatus(
           seasons.map((entry) => entry.entry.status),
           totalOf.get(row.id) ?? seasons.length,

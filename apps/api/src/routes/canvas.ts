@@ -7,11 +7,19 @@ import {
 } from '@osusume/shared';
 import { and, asc, eq, exists, inArray, sql } from 'drizzle-orm';
 import type { Database } from '../db/client.ts';
-import { canvasLink, canvasPosition, image, listEntry, season, series } from '../db/schema.ts';
+import {
+  canvasLink,
+  canvasPosition,
+  image,
+  listEntry,
+  season,
+  series,
+  seriesRating,
+} from '../db/schema.ts';
 import { ApiError, one } from '../lib/errors.ts';
 import { createRouter, valid } from '../lib/router.ts';
 import { requireSession } from '../middleware/auth.ts';
-import { canView, listNotFound, loadListRefs, loadViewer } from '../social/lists.ts';
+import { canView, listNotFound, loadListRefs, loadViewer, ratingOrDefault } from '../social/lists.ts';
 
 /** The series on a user's canvas: any of its seasons on their list at a status past plan to watch. */
 const onCanvas = (db: Database, ownerId: string, seriesId: typeof series.id) =>
@@ -49,6 +57,7 @@ async function loadCanvas(db: Database, ownerId: string) {
         imageHeight: image.height,
         x: canvasPosition.x,
         y: canvasPosition.y,
+        rating: ratingOrDefault,
       })
       .from(series)
       .leftJoin(image, and(eq(image.seriesId, series.id), eq(image.isPrimary, true)))
@@ -56,6 +65,7 @@ async function loadCanvas(db: Database, ownerId: string) {
         canvasPosition,
         and(eq(canvasPosition.seriesId, series.id), eq(canvasPosition.userId, ownerId)),
       )
+      .leftJoin(seriesRating, and(eq(seriesRating.seriesId, series.id), eq(seriesRating.userId, ownerId)))
       .where(onCanvas(db, ownerId, series.id))
       .orderBy(asc(series.title), asc(series.id)),
     db
@@ -78,6 +88,7 @@ async function loadCanvas(db: Database, ownerId: string) {
           : { id: node.imageId, width: node.imageWidth ?? 0, height: node.imageHeight ?? 0 },
       x: node.x,
       y: node.y,
+      rating: node.rating,
     })),
     // Links to a series that left the list stay stored but are not shown.
     links: links.filter((link) => ids.has(link.seriesAId) && ids.has(link.seriesBId)),

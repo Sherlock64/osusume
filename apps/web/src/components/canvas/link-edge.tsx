@@ -1,10 +1,10 @@
 import type { CanvasLink, CanvasLinkKind } from '@osusume/shared';
 import { BaseEdge, getStraightPath, type Edge, type EdgeProps } from '@xyflow/react';
 import { STAR_SIZE } from '@/components/canvas/series-node';
+import { STAR } from '@/components/star-rating';
 
 export type LinkFlowEdge = Edge<{ link: CanvasLink }, 'link'>;
 
-const STAR = 'M0-6 1.3-1.3 6 0 1.3 1.3 0 6-1.3 1.3-6 0-1.3-1.3Z';
 const CROSS = 'M-4-4 4 4M4-4-4 4';
 
 interface Ends {

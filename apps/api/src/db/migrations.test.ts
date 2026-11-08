@@ -55,6 +55,7 @@ describe('migrations on a real Postgres', () => {
       'season',
       'season_tag',
       'series',
+      'series_rating',
       'series_tag',
       'session',
       'tag',

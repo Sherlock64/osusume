@@ -1,16 +1,20 @@
 import {
   listQuerySchema,
   listSlugParamSchema,
+  ownListQuerySchema,
   putListEntrySchema,
   putListSettingsSchema,
+  putSeriesRatingSchema,
   seasonIdParamSchema,
+  seriesIdParamSchema,
   textCursorSortSchema,
   usernameKey,
   usernameParamSchema,
 } from '@osusume/shared';
 import { and, eq, sql } from 'drizzle-orm';
 import { createMiddleware } from 'hono/factory';
-import { listEntry, listSettings } from '../db/schema.ts';
+import { seriesNotFound } from '../catalog/entries.ts';
+import { listEntry, listSettings, seriesRating } from '../db/schema.ts';
 import type { AppEnv } from '../lib/context.ts';
 import { ApiError, isForeignKeyViolation, one } from '../lib/errors.ts';
 import { publicNoStore } from '../lib/http-cache.ts';
@@ -62,12 +66,13 @@ function toMemberSeason({ entry, season, matched }: ListedSeason) {
 
 export const listRoutes = createRouter()
   // The current user's list, one item per series by title, with notes
-  .get('/me/list', requireSession, valid('query', listQuerySchema), async (c) => {
-    const { cursor, limit, status } = c.req.valid('query');
+  .get('/me/list', requireSession, valid('query', ownListQuerySchema), async (c) => {
+    const { cursor, limit, status, rating } = c.req.valid('query');
     const { items, nextCursor } = await loadListPage(c.var.deps.db, c.var.currentUser.id, {
       cursor: decodeListCursor(cursor),
       limit,
       status,
+      rating,
     });
     return c.json(
       {
@@ -75,6 +80,7 @@ export const listRoutes = createRouter()
           seriesId: item.seriesId,
           title: item.title,
           cover: item.cover,
+          rating: item.rating,
           seriesStatus: item.seriesStatus,
           seasons: item.seasons.map((listed) => ({
             ...toMemberSeason(listed),
@@ -133,6 +139,32 @@ export const listRoutes = createRouter()
     }
     return c.body(null, 204);
   })
+  // Rate a series 0 to 5 stars, or change its rating
+  .put(
+    '/me/ratings/:seriesId',
+    requireSession,
+    valid('param', seriesIdParamSchema),
+    valid('json', putSeriesRatingSchema),
+    async (c) => {
+      const { seriesId } = c.req.valid('param');
+      const { rating } = c.req.valid('json');
+      try {
+        await c.var.deps.db
+          .insert(seriesRating)
+          .values({ userId: c.var.currentUser.id, seriesId, rating })
+          .onConflictDoUpdate({
+            target: [seriesRating.userId, seriesRating.seriesId],
+            set: { rating, updatedAt: new Date() },
+          });
+      } catch (error) {
+        if (isForeignKeyViolation(error, 'series_rating_series_id_series_id_fk')) {
+          throw seriesNotFound();
+        }
+        throw error;
+      }
+      return c.json({ seriesId, rating }, 200);
+    },
+  )
   // Who can see the current user's list
   .get('/me/list-settings', requireSession, async (c) => {
     // The row is created by the first PUT. Until then the list has the default, private.

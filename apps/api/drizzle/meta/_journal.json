@@ -71,6 +71,13 @@
       "when": 1794069835135,
       "tag": "0009_drop_unused_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1794099726364,
+      "tag": "0010_series_rating",
+      "breakpoints": true
     }
   ]
 }

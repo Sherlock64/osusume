@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { coverSchema } from './catalog.ts';
+import { seriesRatingSchema } from './social.ts';
 
 /** 'recommend' means the two series go together, 'avoid' that they do not. */
 export const canvasLinkKinds = ['recommend', 'avoid'] as const;
@@ -20,6 +21,8 @@ export const canvasNodeSchema = z.object({
   cover: coverSchema.nullable(),
   x: z.number().nullable(),
   y: z.number().nullable(),
+  /** The owner's rating of the series, the default until they rate it. */
+  rating: seriesRatingSchema,
 });
 export type CanvasNode = z.infer<typeof canvasNodeSchema>;
 
