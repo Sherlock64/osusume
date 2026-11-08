@@ -83,10 +83,10 @@ export function MapSearch({
   }, [q, results.data]);
 
   return (
-    <div className='flex min-h-0 flex-col gap-2'>
+    <div className="flex min-h-0 flex-col gap-2">
       <form
-        role='search'
-        className='flex flex-col gap-1.5'
+        role="search"
+        className="flex flex-col gap-1.5"
         onSubmit={(event) => {
           event.preventDefault();
           const top = items?.[0];
@@ -94,57 +94,50 @@ export function MapSearch({
         }}
       >
         <Label htmlFor={inputId}>{label}</Label>
-        <div className='relative'>
+        <div className="relative">
           <Search
-            className='text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2'
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
             aria-hidden
           />
           <Input
             id={inputId}
-            type='search'
+            type="search"
             maxLength={SEARCH_QUERY_MAX_LENGTH}
-            placeholder='Titles and alternate titles'
-            autoComplete='off'
+            placeholder="Titles and alternate titles"
+            autoComplete="off"
             autoFocus={autoFocus}
             value={text}
             onChange={(event) => {
               setText(event.target.value);
             }}
-            className='pl-9'
+            className="pl-9"
           />
         </div>
       </form>
+      {/* Outset by the buttons' padding, so the covers line up with the input's left edge. */}
       {q !== '' &&
-        (items === undefined ? (
+        (items === undefined ?
           <QueryFallback query={results} />
-        ) : items.length === 0 ? (
-          <p role='status' className='text-muted-foreground py-2 text-sm'>
+        : items.length === 0 ?
+          <p role="status" className="text-muted-foreground py-2 text-sm">
             No series on the map match
           </p>
-        ) : (
-          <ul className='nowheel -mx-1 flex max-h-[50vh] flex-col gap-0.5 overflow-y-auto px-1 pointer-coarse:max-h-56'>
+        : <ul className="nowheel -mx-2 flex max-h-[50vh] flex-col gap-0.5 overflow-y-auto px-1 pointer-coarse:max-h-56">
             {items.map((node) => (
               <li key={node.seriesId}>
                 <Button
-                  variant='ghost'
-                  className='h-auto w-full justify-start gap-3 py-1 text-left font-normal whitespace-normal wrap-anywhere'
+                  variant="ghost"
+                  className="h-auto w-full justify-start gap-3 px-1 py-1 text-left md:px-1 font-normal whitespace-normal wrap-anywhere"
                   onClick={() => {
                     onPick(node.seriesId);
                   }}
                 >
-                  <CoverImage
-                    cover={node.cover}
-                    size='small'
-                    alt=''
-                    title={node.title}
-                    className='w-8 shrink-0'
-                  />
-                  <span className='min-w-0 font-medium'>{node.title}</span>
+                  <CoverImage cover={node.cover} size="small" alt="" title={node.title} className="w-8 shrink-0" />
+                  <span className="min-w-0 font-medium">{node.title}</span>
                 </Button>
               </li>
             ))}
-          </ul>
-        ))}
+          </ul>)}
     </div>
   );
 }

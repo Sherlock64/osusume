@@ -60,12 +60,15 @@ function ListSearch({ q }: { q: string | undefined }) {
           />
         </div>
       </div>
-      <Button type="submit">Search</Button>
-      {q !== undefined && (
-        <Link to="/" search={(prev) => ({ ...prev, q: undefined })} className={buttonVariants({ variant: 'ghost' })}>
-          Clear
-        </Link>
-      )}
+      {/* One group, so Clear never wraps onto a line of its own. */}
+      <div className="flex gap-3">
+        <Button type="submit">Search</Button>
+        {q !== undefined && (
+          <Link to="/" search={(prev) => ({ ...prev, q: undefined })} className={buttonVariants({ variant: 'ghost' })}>
+            Clear
+          </Link>
+        )}
+      </div>
     </form>
   );
 }
