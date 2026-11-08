@@ -15,6 +15,8 @@ export type SeriesNodeData = {
   interactive: boolean;
   /** Newly placed by the layout this session: plays a brief pop-in. */
   popIn: boolean;
+  /** The series the map search last focused: a glowing ring. */
+  highlighted: boolean;
 };
 
 export type SeriesFlowNode = Node<SeriesNodeData, 'series'>;
@@ -49,6 +51,7 @@ export function SeriesNode({ data, dragging }: NodeProps<SeriesFlowNode>) {
         if (event.animationName === 'canvas-bounce') setBouncing(false);
       }}
     >
+      {data.highlighted && <span className="canvas-highlight" aria-hidden />}
       {/* Always rendered, since lines attach to them; hidden when the node can't be connected. */}
       {HANDLES.map((handle) => (
         <Handle
