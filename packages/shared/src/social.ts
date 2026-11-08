@@ -46,6 +46,30 @@ export const putListEntrySchema = z.object({
     .optional(),
 });
 
+/** A series rated in stars, 0 to 5 whole stars. A series never rated counts as the default. */
+export const SERIES_RATING_MAX = 5;
+export const SERIES_RATING_DEFAULT = 3;
+export const seriesRatingSchema = z.int().min(0).max(SERIES_RATING_MAX);
+export type SeriesRating = z.infer<typeof seriesRatingSchema>;
+
+/** What each rating means, indexed by the rating. */
+export const seriesRatingLabels: readonly string[] = [
+  'Do not watch this under any circumstances.',
+  'Just don\'t. A few people might like it, but no.',
+  'Probably not. I can\'t suggest it, but go ahead if you\'re curious.',
+  'Sure, give it a watch. You\'ll probably like it.',
+  'A great pick. You can\'t go wrong.',
+  'An absolute gold mine. Watch, watch, watch.',
+];
+
+/** The owner's list can also be narrowed to series with one rating. */
+export const ownListQuerySchema = listQuerySchema.extend({
+  rating: z.coerce.number().pipe(seriesRatingSchema).optional(),
+});
+
+export const seriesIdParamSchema = z.object({ seriesId: z.uuid() });
+export const putSeriesRatingSchema = z.object({ rating: seriesRatingSchema });
+
 export const putListSettingsSchema = z.object({ visibility: visibilityTierSchema });
 
 export const listSettingsSchema = z.object({

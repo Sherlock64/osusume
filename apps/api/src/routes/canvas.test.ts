@@ -169,3 +169,52 @@ describe('the canvas', () => {
     expect(back.nodes.find((n) => n.seriesId === a.id)).toMatchObject({ x: 10, y: 20 });
   });
 });
+
+describe('ratings', () => {
+  const rate = (m: Member, seriesId: string, rating: unknown) =>
+    t.request('PUT', `/api/v1/me/ratings/${seriesId}`, { rating }, { cookie: m.cookie });
+
+  it('shows on the canvas and the own list, 3 until rated', async () => {
+    const m = await t.seedLoggedIn();
+    const s = await seedSeries(1);
+    await setList(m, s.seasonIds[0] ?? '', 'completed');
+    const ratingOf = async () => (await read(m)).nodes[0] as unknown as { rating: number };
+    expect((await ratingOf()).rating).toBe(3);
+    expect((await rate(m, s.id, 0)).status).toBe(200);
+    expect((await ratingOf()).rating).toBe(0);
+    expect((await rate(m, s.id, 5)).status).toBe(200);
+    expect((await ratingOf()).rating).toBe(5);
+    const list = await t.request('GET', '/api/v1/me/list', undefined, { cookie: m.cookie });
+    expect((list.body as { items: { rating: number | null }[] }).items[0]?.rating).toBe(5);
+    // Another member's rating stays theirs.
+    const other = await t.seedLoggedIn();
+    await setList(other, s.seasonIds[0] ?? '', 'completed');
+    expect((await read(other)).nodes[0]).toMatchObject({ rating: 3 });
+  });
+
+  it('filters the own list by rating, unrated counting as 3, alongside status', async () => {
+    const m = await t.seedLoggedIn();
+    const [a, b, c] = [await seedSeries(1, 'R a'), await seedSeries(1, 'R b'), await seedSeries(1, 'R c')];
+    await setList(m, a.seasonIds[0] ?? '', 'completed');
+    await setList(m, b.seasonIds[0] ?? '', 'completed');
+    await setList(m, c.seasonIds[0] ?? '', 'watching');
+    await rate(m, a.id, 5);
+    const ids = async (query: string) =>
+      ((await t.request('GET', `/api/v1/me/list?${query}`, undefined, { cookie: m.cookie })).body as {
+        items: { seriesId: string }[];
+      }).items.map((item) => item.seriesId);
+    expect(await ids('rating=5')).toEqual([a.id]);
+    expect(await ids('rating=3')).toEqual([b.id, c.id]);
+    expect(await ids('rating=3&status=watching')).toEqual([c.id]);
+    expect(await ids('rating=0')).toEqual([]);
+    const bad = await t.request('GET', '/api/v1/me/list?rating=9', undefined, { cookie: m.cookie });
+    expect(bad.status).toBe(400);
+  });
+
+  it('refuses ratings outside 0 to 5 and unknown series', async () => {
+    const m = await t.seedLoggedIn();
+    const s = await seedSeries(1);
+    for (const bad of [-1, 6, 2.5, '3']) expect((await rate(m, s.id, bad)).status).toBe(400);
+    expectError(await rate(m, NO_ID, 3), 404, 'series_not_found');
+  });
+});

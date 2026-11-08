@@ -21,6 +21,7 @@ import {
   pgEnum,
   pgTable,
   primaryKey,
+  smallint,
   text,
   timestamp,
   unique,
@@ -32,9 +33,9 @@ import {
  * What removing a user does (V1_DECISIONS.md: removed, banned, delete own account).
  * All of these happen on `DELETE FROM "user"`, so no code path can forget a step.
  *
- *   CASCADE    session, account, list_entry, list_settings, friendship (either
- *              side), username_change_request and email_change_request: this is
- *              the user's own data.
+ *   CASCADE    session, account, list_entry, list_settings, series_rating, friendship
+ *              (either side), username_change_request and email_change_request: this
+ *              is the user's own data.
  *   SET NULL   who-did-it columns: image.uploaded_by, catalog_request.requester_id
  *              and reviewed_by, invite_request.requester_id and decided_by,
  *              username_change_request.decided_by and email_blacklist.banned_by.
@@ -489,6 +490,25 @@ export const listSettings = pgTable(
       'list_settings_slug_only_while_public',
       sql`(${t.visibility} = 'public') = (${t.publicSlug} IS NOT NULL)`,
     ),
+  ],
+);
+
+/** The owner's star rating of a series, 0 to 5. No row counts as the default. Kept when the series leaves the list. */
+export const seriesRating = pgTable(
+  'series_rating',
+  {
+    userId: uuid()
+      .notNull()
+      .references(() => user.id, { onDelete: 'cascade' }),
+    seriesId: uuid()
+      .notNull()
+      .references(() => series.id, { onDelete: 'cascade' }),
+    rating: smallint().notNull(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.userId, t.seriesId] }),
+    check('series_rating_range', sql`${t.rating} BETWEEN 0 AND 5`),
   ],
 );
 
