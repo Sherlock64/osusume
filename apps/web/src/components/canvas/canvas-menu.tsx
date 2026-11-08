@@ -28,7 +28,8 @@ export function CanvasMenu({ x, y, onDismiss, returnFocusTo, children }: CanvasM
         <Popover.Content
           align="start"
           sideOffset={4}
-          className="bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=open]:fade-in-0 z-50 flex w-56 flex-col gap-0.5 rounded-lg border p-1 shadow-md duration-100"
+          collisionPadding={8}
+          className="bg-popover text-popover-foreground data-[state=open]:animate-in data-[state=open]:fade-in-0 z-50 flex max-h-(--radix-popover-content-available-height) w-56 flex-col gap-0.5 overflow-y-auto rounded-lg border p-1 shadow-md duration-100"
           onPointerDownOutside={() => {
             clickedOutside.current = true;
           }}

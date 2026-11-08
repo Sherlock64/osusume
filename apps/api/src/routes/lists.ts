@@ -67,12 +67,13 @@ function toMemberSeason({ entry, season, matched }: ListedSeason) {
 export const listRoutes = createRouter()
   // The current user's list, one item per series by title, with notes
   .get('/me/list', requireSession, valid('query', ownListQuerySchema), async (c) => {
-    const { cursor, limit, status, rating } = c.req.valid('query');
+    const { cursor, limit, status, rating, q } = c.req.valid('query');
     const { items, nextCursor } = await loadListPage(c.var.deps.db, c.var.currentUser.id, {
       cursor: decodeListCursor(cursor),
       limit,
       status,
       rating,
+      q,
     });
     return c.json(
       {

@@ -42,6 +42,8 @@ describe('migrations on a real Postgres', () => {
     );
     expect(tables.map((t) => t.table_name)).toEqual([
       'account',
+      'canvas_group',
+      'canvas_group_member',
       'canvas_link',
       'canvas_position',
       'catalog_request',

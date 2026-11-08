@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { usernameKey, usernameSchema } from './accounts.ts';
-import { TITLE_MAX_LENGTH, coverSchema } from './catalog.ts';
+import { SEARCH_QUERY_MAX_LENGTH, TITLE_MAX_LENGTH, coverSchema } from './catalog.ts';
 import { listStatusSchema, visibilityTierSchema } from './enums.ts';
 import { paginationQuerySchema } from './http.ts';
 
@@ -65,6 +65,7 @@ export const seriesRatingLabels: readonly string[] = [
 /** The owner's list can also be narrowed to series with one rating. */
 export const ownListQuerySchema = listQuerySchema.extend({
   rating: z.coerce.number().pipe(seriesRatingSchema).optional(),
+  q: z.string().trim().max(SEARCH_QUERY_MAX_LENGTH).optional(),
 });
 
 export const seriesIdParamSchema = z.object({ seriesId: z.uuid() });

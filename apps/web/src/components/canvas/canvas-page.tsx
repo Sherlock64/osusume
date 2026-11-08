@@ -42,6 +42,15 @@ function useCanvasWrite<Variables>(
   });
 }
 
+/** A group write: not optimistic, so the canvas is fetched again once it lands. */
+function useGroupWrite<Variables>(username: string, save: (variables: Variables) => Promise<unknown>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: save,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: canvasQuery(username).queryKey }),
+  });
+}
+
 export function CanvasPage({ username, editable }: { username: string; editable: boolean }) {
   const query = useQuery(canvasQuery(username));
   const move = useCanvasWrite(username, {
@@ -58,12 +67,32 @@ export function CanvasPage({ username, editable }: { username: string; editable:
     save: (pair) => request(api.me.canvas.links.$delete({ query: pair })),
   });
 
+  const createGroup = useGroupWrite(username, (json: { name: string; seriesId: string }) =>
+    request(api.me.canvas.groups.$post({ json })),
+  );
+  const renameGroup = useGroupWrite(username, ({ groupId, name }: { groupId: string; name: string }) =>
+    request(api.me.canvas.groups[':groupId'].$patch({ param: { groupId }, json: { name } })),
+  );
+  const deleteGroup = useGroupWrite(username, (groupId: string) =>
+    request(api.me.canvas.groups[':groupId'].$delete({ param: { groupId } })),
+  );
+  const addToGroup = useGroupWrite(
+    username,
+    async ({ groupId, seriesId, x, y }: { groupId: string; seriesId: string; x: number; y: number }) => {
+      await request(api.me.canvas.groups[':groupId'].series[':seriesId'].$put({ param: { groupId, seriesId } }));
+      await savePositions([{ seriesId, x, y }]);
+    },
+  );
+  const removeFromGroup = useGroupWrite(username, (param: { groupId: string; seriesId: string }) =>
+    request(api.me.canvas.groups[':groupId'].series[':seriesId'].$delete({ param })),
+  );
+
   // The same for a missing user, a disabled one or a hidden list: nothing here may tell them apart.
   if (query.isError && isNotFoundError(query.error)) return <EmptyState title={`${CANVAS_LABEL} not found`} />;
   if (query.data === undefined) return <QueryFallback query={query} />;
 
   const title = `${username}'s ${CANVAS_LABEL.toLowerCase()}`;
-  const { nodes, links } = query.data;
+  const { nodes, links, groups } = query.data;
   if (nodes.length === 0) {
     return (
       <>
@@ -80,13 +109,18 @@ export function CanvasPage({ username, editable }: { username: string; editable:
     );
   }
 
-  const failedWrite = [move, setLink, removeLink].find((write) => write.isError);
+  // A failed delete shows in its confirm dialog instead.
+  const failedWrite = [move, setLink, removeLink, createGroup, renameGroup, addToGroup, removeFromGroup].find(
+    (write) => write.isError,
+  );
   return (
     // The canvas takes the whole viewport under the shell's 56px header. Fixed, so a classic scrollbar can't add sideways scroll.
     <div className="fixed inset-x-0 top-14 bottom-0">
       <RecommendationCanvas
+        username={username}
         nodes={nodes}
         links={links}
+        groups={groups}
         editable={editable}
         onMoveNodes={(positions) => {
           move.mutate(positions);
@@ -96,6 +130,19 @@ export function CanvasPage({ username, editable }: { username: string; editable:
         }}
         onRemoveLink={(seriesAId, seriesBId) => {
           removeLink.mutate({ seriesAId, seriesBId });
+        }}
+        onCreateGroup={(name, seriesId) => {
+          createGroup.mutate({ name, seriesId });
+        }}
+        onRenameGroup={(groupId, name) => {
+          renameGroup.mutate({ groupId, name });
+        }}
+        onDeleteGroup={(groupId) => deleteGroup.mutateAsync(groupId)}
+        onAddToGroup={(groupId, seriesId, { x, y }) => {
+          addToGroup.mutate({ groupId, seriesId, x, y });
+        }}
+        onRemoveFromGroup={(groupId, seriesId) => {
+          removeFromGroup.mutate({ groupId, seriesId });
         }}
       />
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col items-start gap-2 p-4">

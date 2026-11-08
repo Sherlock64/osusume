@@ -210,3 +210,71 @@
     filter: none;
   }
 }
+
+/* Constellations: a hairline box behind the bubbles. Only its name plate takes the pointer, so the sky pans through it. */
+.canvas-flow .react-flow__node.react-flow__node-constellation {
+  pointer-events: none !important;
+  cursor: default;
+}
+
+.canvas-flow .canvas-group-handle {
+  pointer-events: auto;
+}
+
+/* A bubble or box the layout moved for the user glides there; the bounce waits for it to arrive. */
+.canvas-flow .react-flow__node.canvas-slide {
+  transition:
+    transform 150ms ease-out,
+    width 150ms ease-out,
+    height 150ms ease-out;
+}
+
+.canvas-slide .canvas-bounce {
+  animation-delay: 150ms;
+}
+
+/* The series the map search found: a steady gold glow, and a ring that ripples out from it a few times. */
+.canvas-highlight {
+  position: absolute;
+  inset: -10px;
+  border-radius: 9999px;
+  pointer-events: none;
+  box-shadow:
+    0 0 0 2px var(--star),
+    0 0 22px 6px color-mix(in oklab, var(--star) 55%, transparent);
+  animation: canvas-highlight-in 300ms ease-out;
+}
+
+.canvas-highlight::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--star);
+  opacity: 0;
+  animation: canvas-highlight-ripple 1200ms ease-out 300ms 3;
+}
+
+@keyframes canvas-highlight-in {
+  from { opacity: 0; transform: scale(0.85); }
+}
+
+@keyframes canvas-highlight-ripple {
+  0% { opacity: 0.9; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1.4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .canvas-flow .react-flow__node.canvas-slide {
+    transition: none;
+  }
+
+  .canvas-slide .canvas-bounce {
+    animation-delay: 0ms;
+  }
+
+  .canvas-highlight,
+  .canvas-highlight::after {
+    animation: none;
+  }
+}

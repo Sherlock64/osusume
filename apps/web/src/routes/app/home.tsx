@@ -3,11 +3,13 @@ import {
   listStatusSchema,
   type ListStatus,
   listStatusLabels,
+  SEARCH_QUERY_MAX_LENGTH,
   SERIES_RATING_MAX,
   type SeriesRating,
   seriesRatingSchema,
 } from '@osusume/shared';
-import { createRoute, Link } from '@tanstack/react-router';
+import { createRoute, Link, useNavigate } from '@tanstack/react-router';
+import { Search } from 'lucide-react';
 import { z } from 'zod';
 import { ListSeriesGrid } from '@/components/list-series';
 import { PageHeader } from '@/components/page-header';
@@ -15,13 +17,61 @@ import { EmptyState, LoadMore, QueryFallback } from '@/components/states';
 import { ratingText, Star } from '@/components/star-rating';
 import { StatusBadge } from '@/components/status-badge';
 import { TextLink } from '@/components/text-link';
-import { buttonVariants } from '@/components/ui/button';
+import { Button, buttonVariants } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { api } from '@/lib/api';
 import { request } from '@/lib/api-request';
 import { ownListKey } from '@/lib/own-list';
 import { useCursorList } from '@/lib/pagination';
 import { cn } from '@/lib/utils';
 import { appRoute } from '@/routes/app';
+
+function ListSearch({ q }: { q: string | undefined }) {
+  const navigate = useNavigate({ from: '/' });
+  return (
+    <form
+      role="search"
+      className="mb-4 flex flex-wrap items-end gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        const searched = new FormData(event.currentTarget).get('q');
+        const next = typeof searched === 'string' ? searched.trim() : '';
+        void navigate({ search: (prev) => ({ ...prev, q: next || undefined }) });
+      }}
+    >
+      <div className="flex min-w-48 flex-1 flex-col gap-1.5">
+        <Label htmlFor="list-search">Search</Label>
+        <div className="relative">
+          <Search
+            className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2"
+            aria-hidden
+          />
+          <Input
+            // Follows the address, such as when going back.
+            key={q ?? ''}
+            id="list-search"
+            name="q"
+            type="search"
+            maxLength={SEARCH_QUERY_MAX_LENGTH}
+            defaultValue={q ?? ''}
+            placeholder="Titles and alternate titles"
+            className="pl-9"
+          />
+        </div>
+      </div>
+      {/* One group, so Clear never wraps onto a line of its own. */}
+      <div className="flex gap-3">
+        <Button type="submit">Search</Button>
+        {q !== undefined && (
+          <Link to="/" search={(prev) => ({ ...prev, q: undefined })} className={buttonVariants({ variant: 'ghost' })}>
+            Clear
+          </Link>
+        )}
+      </div>
+    </form>
+  );
+}
 
 function StatusFilter({ current }: { current: ListStatus | undefined }) {
   return (
@@ -76,9 +126,9 @@ function RatingFilter({ current }: { current: SeriesRating | undefined }) {
 }
 
 function MyListPage() {
-  const { status, rating } = homeRoute.useSearch();
+  const { q, status, rating } = homeRoute.useSearch();
   const { query, items } = useCursorList({
-    queryKey: [...ownListKey, 'page', status ?? 'all', rating ?? 'any'],
+    queryKey: [...ownListKey, 'page', status ?? 'all', rating ?? 'any', q ?? ''],
     fetchPage: (cursor) =>
       request(
         api.me.list.$get({
@@ -86,6 +136,7 @@ function MyListPage() {
             ...(cursor === undefined ? {} : { cursor }),
             ...(status === undefined ? {} : { status }),
             ...(rating === undefined ? {} : { rating: String(rating) }),
+            ...(q === undefined ? {} : { q }),
           },
         }),
       ),
@@ -102,12 +153,17 @@ function MyListPage() {
           </Link>
         }
       />
+      <ListSearch q={q} />
       <StatusFilter current={status} />
       <RatingFilter current={rating} />
       {query.data === undefined ?
         <QueryFallback query={query} />
       : items.length === 0 ?
-        status === undefined && rating === undefined ?
+        q !== undefined ?
+          <EmptyState title="Nothing on your list matches">
+            <TextLink to="/">Show the whole list</TextLink>
+          </EmptyState>
+        : status === undefined && rating === undefined ?
           <EmptyState title="Your list is empty">
             <TextLink to="/catalog">Find something in the catalog</TextLink>
           </EmptyState>
@@ -129,6 +185,7 @@ export const homeRoute = createRoute({
   getParentRoute: () => appRoute,
   path: '/',
   validateSearch: z.object({
+    q: z.string().max(SEARCH_QUERY_MAX_LENGTH).optional().catch(undefined),
     status: listStatusSchema.optional().catch(undefined),
     rating: seriesRatingSchema.optional().catch(undefined),
   }),
