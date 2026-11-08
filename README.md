@@ -1,285 +1,91 @@
-# osusume
-Anime watch tracker that lets you compare anime you've watched with friends and suggest recommendations.
+# Osusume
 
-## Development
+Osusume (オススメ, "recommendation") is an anime watch tracker. You keep a list of the anime that you watch. You compare your list with the lists of your friends. On the Constellations page, you put your series on a map and draw lines between them. A line shows that two series go together, or that they do not go together.
 
-Needs Node 26 (`.nvmrc`), pnpm (version pinned in `package.json`) and Podman.
+Osusume is a small, private site. An admin invites each member. Everything runs on one server or on one small Kubernetes cluster.
+
+## Features
+
+- **My List**: add the seasons that you watch, set a status and a star rating, and search your list.
+- **Catalog**: the series and seasons that the site knows. Members read it and send requests. Admins change it.
+- **Friends and compare**: send friend requests and compare the lists of two or more people.
+- **Constellations**: a map of your series, with lines and named groups. Other people can look at your map, but they cannot change it.
+- **Public list**: you can share a read-only link to your list.
+- **Admin pages**: invites, catalog requests, users, tags and username changes.
+
+## Quick start
+
+You need Node 26, pnpm and Podman. Read [docs/development.md](docs/development.md) for the full procedure.
 
 ```sh
 pnpm install
 cp .env.example .env
-pnpm dev:services   # Postgres on 127.0.0.1:54329, Mailpit on 127.0.0.1:1025 (UI on :8025)
+pnpm dev:services
 pnpm db:migrate
-pnpm dev:api        # http://localhost:3000/api/v1/health
-pnpm dev:web        # http://localhost:5173, proxies /api to the api
+pnpm dev:api
+pnpm dev:web
 ```
 
-`pnpm dev:services` uses `podman compose`, which needs a compose provider installed.
-Without one, the same services can be started directly:
+Then open http://localhost:5173/setup to make the first admin. The setup email is in Mailpit at http://localhost:8025.
 
-```sh
-podman run -d --name osusume-dev-pg -p 127.0.0.1:54329:5432 \
-  -e POSTGRES_USER=osusume -e POSTGRES_PASSWORD=osusume_dev -e POSTGRES_DB=osusume \
-  -v osusume-dev-pg:/var/lib/postgresql docker.io/library/postgres:18-alpine
-podman run -d --name osusume-dev-mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 \
-  docker.io/axllent/mailpit:v1.33
-```
+## Documentation
 
-## Web app
+| Document | Contents |
+| --- | --- |
+| [docs/development.md](docs/development.md) | Set up your computer. Run the site in the three environments. Run the checks and the validation run. |
+| [docs/architecture.md](docs/architecture.md) | How the parts of the project connect. The data model and the rules that the code keeps. |
+| [docs/design-guide.md](docs/design-guide.md) | The "star atlas" look. The tokens, components and layout rules for the web app. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Branches, commits, checks, pull requests and the writing rules for documents. |
+| [CLAUDE.md](CLAUDE.md) | Instructions for AI agents. The project skills are in `.claude/skills/`. |
+| [TODO.md](TODO.md) | Open items from the most recent review. |
 
-`pnpm dev:web` serves the SPA on port 5173 and proxies `/api` to the api, so the browser sees one
-origin. `PUBLIC_BASE_URL` must be the address the browser uses, or Better Auth refuses its POSTs and
-emailed links go elsewhere. Pick other ports with `pnpm dev:web --port 5180` and
-`API_PROXY_TARGET=http://localhost:3460`.
+## Technology
 
-Routes live in `apps/web/src/routes`, assembled in `apps/web/src/router.tsx`. Pages that need a login
-are children of `appRoute`, which guards them and draws the shell; the menu is
-`apps/web/src/app/nav.ts`.
-
-## Run it with Podman Compose
-
-Proxy, web, api, Postgres, Mailpit and a migrate step, with mail going to Mailpit. Needs a compose
-provider, as above.
-
-```sh
-infra/init-compose-env.sh                     # once: generates the secrets into infra/.env
-podman compose -f infra/compose.yaml up -d --build
-```
-
-Then open http://localhost:8090/setup to create the first admin, and find the link in Mailpit at
-http://localhost:8026. Set `OSUSUME_PORT` and `MAILPIT_PORT` in `infra/.env` to use other ports. Both
-are bound to 127.0.0.1, so everyone arriving through the published port shares one rate-limit bucket.
-
-Migrations run on every `up`. `down` keeps the data; `down -v` deletes it.
-
-## Run it on minikube
-
-Needs the ingress addon. The chart in `infra/helm/osusume` holds the settings and notes in its
-`values.yaml`. It sends real email, so first create the Secret it expects, in the namespace you
-install to, with the keys `SMTP_USER` and `SMTP_PASSWORD`. Gmail needs an app password.
-
-```sh
-kubectl create namespace osusume
-kubectl -n osusume create secret generic osusume-smtp \
-  --from-literal=SMTP_USER=you@example.com --from-literal=SMTP_PASSWORD='the app password'
-cp infra/helm/values.local.yaml.example infra/helm/values.local.yaml   # then set smtp.from
-```
-
-Build and load the images, then install or upgrade with the same commands. `minikube image load`
-can't see Podman's images by name, so they go through a file. Each build needs a new tag, or the
-Deployments see no change.
-
-```sh
-TAG=$(git rev-parse --short HEAD)
-for target in api web; do
-  podman build --target $target -t localhost/osusume-$target:$TAG -f Containerfile .
-  podman save -o /tmp/osusume-$target.tar localhost/osusume-$target:$TAG
-  minikube image load /tmp/osusume-$target.tar
-  rm /tmp/osusume-$target.tar
-done
-helm upgrade --install osusume infra/helm/osusume -n osusume -f infra/helm/values.local.yaml \
-  --set image.api.tag=$TAG --set image.web.tag=$TAG --wait --timeout 5m
-kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8080:80
-```
-
-Then open http://localhost:8080/setup to create the first admin. The site answers only at the
-address in `publicBaseUrl` and the host in `ingress.host`.
-
-The api runs as one replica, as its rate limits are counted per process. `AUTH_SECRET` and the
-Postgres password are generated on first install and reused on upgrade. They and both volumes are
-kept by `helm uninstall`; to start over, also delete the namespace.
-
-If about a third of requests hang, check the controller's log for `pthread_create() failed`. On a
-machine with many cores, ingress-nginx starts one worker per core, each with 33 threads, which can
-pass the pod's process limit (`pids.max` in the controller pod). The workers that fail to start
-leave listening sockets that nobody answers. Fewer workers avoid it:
-
-```sh
-kubectl -n ingress-nginx patch configmap ingress-nginx-controller --type merge \
-  -p '{"data":{"worker-processes":"2"}}'
-```
-
-## Smoke tests
-
-A few Playwright tests in `e2e/` that run against either deployment. They need a browser once:
-`pnpm --filter @osusume/e2e exec playwright install chromium-headless-shell`.
-
-```sh
-SMOKE_BASE_URL=http://localhost:8090 SMOKE_MAILPIT_URL=http://localhost:8026 pnpm smoke
-```
-
-`SMOKE_BASE_URL` defaults to http://localhost:8080. With `SMOKE_MAILPIT_URL` on a new install, they
-do first-run setup and create an admin, so don't use it on a site you want to set up yourself.
-Otherwise, set `SMOKE_ADMIN_USERNAME` and `SMOKE_ADMIN_PASSWORD` for the tests that need a login;
-they add and then delete a series. Without either, those tests are skipped.
-
-## Checks
-
-```sh
-pnpm typecheck
-pnpm lint
-pnpm test    # database tests need Postgres running; see TEST_DATABASE_URL below
-pnpm build
-```
-
-Database tests create and drop their own scratch databases on the dev Postgres. Set
-`TEST_DATABASE_URL` to use a different server; its role must be able to create databases.
-
-Account tests send real email to Mailpit, each to an address made up for that test, and read it
-back through Mailpit's API. Set `TEST_SMTP_HOST`, `TEST_SMTP_PORT` and `TEST_MAILPIT_URL` to use
-a different one.
-
-## Accounts
-
-A fresh install has no accounts. Open the site's first-run setup page, or call
-`POST /api/v1/setup`; the emailed link creates the permanent first admin and closes setup for
-good. Everyone after that arrives by an approved invite. In development the emails are in
-Mailpit's UI on port 8025.
-
-Better Auth is mounted at `/api/auth`, exposing only what `exposedAuthEndpoints` in
-`apps/api/src/auth/auth.ts` lists. Its rate limiter keys on the client IP from `X-Forwarded-For`
-and trusts that header only when it holds a single value, so a proxy in front of the api must
-overwrite the header rather than append to it.
-
-That limiter counts per client IP on `/api/auth`. Other routes that check a password
-(`POST /me/email`, `DELETE /me`) use `requireSessionForPasswordCheck`, which allows 3 attempts per
-10 seconds per user. Both keep their counts in memory: they reset on restart, and each api process
-counts separately, so running N instances allows N times the attempts. `POST /invite-requests` uses
-the same limiter with its own bucket, 10 requests per hour per logged-in user, admins included. It
-runs before the address is read, so a 429 says nothing about any address. `POST /invites/{token}/accept`
-needs no login, so it allows 10 attempts per minute per client IP, before anything is read.
-
-Request bodies are limited to 1 MiB, by `limitRequestBody` in `apps/api/src/lib/body-size.ts`, before
-anything reads them. Only image uploads are larger, with their own limit.
-
-Answers about an address give nothing away. A non-admin always gets the same success from
-`POST /invite-requests`, including for an address with an account, on the blacklist or with an open
-invite: a refused address creates no row and sends nothing, and only the admin queue,
-`GET /admin/invite-requests`, shows requests. Members have no record of who they invited.
-`POST /me/email`, once the password is correct, and `POST /me/email/verify` always answer a
-non-admin "Request completed", whatever happened. A send failure is logged and drops the link. Response
-times are not hidden. Any attempt with the correct password cancels the earlier pending link, refused or not. Admins get the specific reason, including `email_failed`. Malformed input, a wrong password
-and rate limiting are still reported to everyone.
-
-Any invite link that cannot be used gets one identical answer from `GET /invites/{token}` and
-`POST /invites/{token}/accept`, for every caller, admins included.
-
-Routes that need a login use `requireSession` or `requireAdmin` from
-`apps/api/src/middleware/auth.ts` as their `middleware`, then read `c.var.currentUser`.
-
-## Catalog
-
-Members read the catalog and file requests; only admins write to it. `GET /series` lists newest
-first by each series' earliest dated season, with blank dates last, or best match first when
-searching. Catalog reads carry `Cache-Control: private, no-cache` and an ETag, so the browser asks
-again each time, which rechecks the session, and an unchanged response costs a 304.
-
-Writes that span rows take `lockCatalog` from `apps/api/src/lib/locks.ts`, before any row lock.
-
-## Lists and friends
-
-`GET /me/list` is the only list response with notes. It and `GET /users/{username}/list` (login
-required, at every tier) return a page of series by title; a series' status is derived on read and
-counts all its seasons in the catalog. `?status=` keeps a series if any of its listed seasons has
-that status, and `matched` marks those seasons.
-
-`canView` in `apps/api/src/social/lists.ts` is the one visibility check, behind the member view, the
-public view and `GET /compare`. Roles play no part, so an admin sees what any member would. A list
-with no `list_settings` row is private; the first `PUT /me/list-settings` creates the row. A missing
-user, a disabled user and a hidden list get the same 404, and compare marks them all unavailable,
-echoing the name as typed. `GET /compare` is not paginated and takes at most 100 usernames.
-
-`GET /lists/{slug}` needs no login and returns titles and status only, with `X-Robots-Tag: noindex`
-and `Cache-Control: no-store`. The slug exists only while the list is public, and going public again
-makes a new one. The api answers `GET /robots.txt`, but crawlers only ask at the site's root, so
-whatever serves that root must forward the path or serve the same rules.
-
-Friendships are one row per pair, in either direction. A declined, cancelled or unfriended pair
-leaves no row, so either side may ask again. `POST /friends/requests` answers a pair that already
-exists with a 409: `friend_request_already_sent`, `friend_request_incoming` or `already_friends`.
-Asking yourself is a 400, `friend_request_self`.
-
-Per-user answers here carry `Cache-Control: private, no-store`, refusals included.
-
-## Images
-
-Uploads are validated by content, resized with sharp and served as WebP. Everything kept is
-re-encoded, which drops metadata such as EXIF location, including the original, which is stored so
-sizes can be regenerated and is never served. Files live under `IMAGE_STORAGE_PATH` through the
-`ImageStorage` interface in `apps/api/src/lib/image-storage.ts`; the volume is the only backend.
-The upload limit and named sizes are set in `packages/shared/src/catalog.ts`, the accepted formats
-in `apps/api/src/lib/image-processing.ts`. An image's URL never changes content, so reads are
-cached privately for a week.
-
-An admin uploads and attaches in one call, a multipart `POST /series/{id}/images` with the image in
-the `file` field, so an image is always in a catalog. If adding it fails after its files are written,
-the files are removed. The first image becomes the primary. Series and seasons return a
-resolved `cover`: the season's own choice, else the series primary, else null for a placeholder.
-
-Files are removed after the transaction commits, so a rollback never loses one. If removal fails,
-the api logs the storage key and still answers with success: the rows are gone, so nothing points
-at the leftover files, which stay on the volume until removed by hand.
-
-## Database
-
-- Change `apps/api/src/db/schema.ts`, then run `pnpm db:generate` and commit the new
-  file in `apps/api/drizzle/`.
-- `pnpm db:migrate` applies migrations. It is a separate step and the api never runs it on
-  startup. In a build, the same entry point is `node apps/api/dist/db/migrate.js`.
+- **API**: Node 26, Hono, Better Auth, Drizzle ORM, PostgreSQL 18, sharp, nodemailer.
+- **Web app**: React 19, Vite, TanStack Router and Query, Tailwind CSS 4, shadcn/ui (Radix), React Flow.
+- **Shared code**: `packages/shared` holds the Zod schemas and the types that the API and the web app both use.
+- **Deployment**: one container image file (`Containerfile`), Podman Compose, and a Helm chart for minikube.
 
 ## Known issues in v1
 
-None of these stop the site working. They are here to fix in a later session.
+None of these issues stop the site for all users. They stay here until a later session fixes them.
 
 Deployment:
 
-- Deleting the `osusume` namespace destroys the data for good, because the volumes use the `Delete`
-  reclaim policy. `helm uninstall` keeps it.
-- The ingress addon's default of 12 nginx workers exceeds the pod's process limit on this host, and
-  requests hang. It is set to `worker-processes: "2"` in the `ingress-nginx-controller` ConfigMap.
-  Re-enabling the addon may reset it.
-- The minikube steps omit `minikube start` and `minikube addons enable ingress`.
-- The image tag comes from the commit hash, so rebuilding uncommitted changes keeps the old pods.
-- `--from-literal` in the SMTP Secret command leaves the password in shell history. Use
-  `--from-file=SMTP_PASSWORD=/dev/stdin` instead.
-- `pnpm smoke` defaults to port 8080, the real install, and uses up its login rate limit. Restarting
-  the api clears the limit.
-- Everyone coming through the port-forward shares one login rate limit bucket.
-- Volume sizes can't be changed after install.
-- Postgres starts as root, and no container sets a seccomp profile or a read-only root filesystem.
-- Upgrades use the Recreate strategy, so expect brief 503s.
+- If you delete the `osusume` namespace, you delete the data permanently. The volumes use the `Delete` reclaim policy. `helm uninstall` keeps the data.
+- The ingress addon starts 12 nginx workers by default. On the owner's computer, this is more than the pod process limit, and requests stop. The fix is `worker-processes: "2"` in the `ingress-nginx-controller` ConfigMap. If you enable the addon again, it can reset this value.
+- The image tag comes from the commit hash. If you build again without a new commit, the old pods continue to run.
+- `pnpm smoke` uses port 8080 by default, which is the real install. It can use all of the login attempts in the rate limit. A restart of the api clears the limit.
+- All users that come through the port-forward share one login rate-limit bucket.
+- You cannot change the volume sizes after the install.
+- Postgres starts as root. No container sets a seccomp profile or a read-only root filesystem.
+- Upgrades use the Recreate strategy. Expect short 503 errors during an upgrade.
 
-Security, to revisit before production:
+Security, to review again before production:
 
-- `/api/v1` CSRF protection relies on `SameSite=Lax`, with no Origin check.
-- Setup and email-change pages submit their token on open, so a mail scanner that runs JavaScript
-  could use up a link. A Confirm button would prevent it.
-- Friend requests have no rate limit, so usernames can be probed.
-- `POST /api/auth/reset-password` answers 500 to a NUL byte in the token, because `/api/auth` is
-  outside the `/api/v1` input check. It also doesn't get the default `Cache-Control`.
-- The site runs on plain HTTP, and session cookies are not `Secure` at that address.
+- CSRF protection on `/api/v1` uses only `SameSite=Lax`. There is no Origin check.
+- The setup page and the email-change page send their token when they open. A mail scanner that runs JavaScript can use a link before the user. A Confirm button would prevent this.
+- Friend requests have no rate limit. A person can use them to find which usernames exist.
+- `POST /api/auth/reset-password` gives a 500 error for a NUL byte in the token, because `/api/auth` is outside the `/api/v1` input check. It also does not get the default `Cache-Control`.
+- The site uses plain HTTP. At that address, the session cookies are not `Secure`.
 
 App:
 
-- The 10-per-hour invite limit also applies to admins and its message is vague, so inviting a large
-  group at once fails with "Too many attempts".
-- The login rate limit message gives no wait time.
-- The largest possible catalog request can exceed the 1 MiB JSON body limit.
-- Dead setup and invite link pages have no link to anywhere.
-- A friend's list heading uses the casing from the URL (`/users/ben` shows "ben's list"), and "Friend
-  request sent to" echoes the casing typed.
-- "Request completed" after an email change doesn't say to check the inbox.
-- Series detail pages walk all of `GET /me/list`. A `GET /me/list/{seasonId}` or a series filter would
-  stop that.
-- The web build warns about a JS chunk over 500 kB. It needs code splitting.
-- A short search query such as `a` matches loosely, because the typo threshold is 0.35. It was only
-  tried on about 40 series.
+- The limit of 10 invites per hour also applies to admins, and its message is not clear. If you invite a large group at one time, you get "Too many attempts".
+- The login rate-limit message does not show the wait time.
+- The largest possible catalog request can be more than the 1 MiB JSON body limit.
+- Setup and invite pages for a link that is not valid have no link to other pages.
+- A friend's list heading uses the letter case from the URL. For example, `/users/ben` shows "ben's list". "Friend request sent to" shows the letter case that you typed.
+- After an email change, "Request completed" does not tell you to look in your inbox.
+- A series detail page loads the full list of the user (`GET /me/list`) to find one series. A `GET /me/list/{seasonId}` endpoint or a series filter would prevent this.
+- The web build gives a warning about a JavaScript chunk that is larger than 500 kB. It needs code splitting.
+- A short search such as `a` finds too many matches, because the typo threshold is 0.35. The threshold was tested only on a catalog of approximately 40 series.
 
 Not tested yet:
 
-- Expired links, and clicking an email-change link while logged out.
-- Refused email changes (address in use or blacklisted).
-- Moving a season to another series, season-specific covers, and removing an image in the UI.
-- Rejecting a username change in the admin screen, and declining a friend request.
+- Expired links, and an email-change link that you open when you are logged out.
+- Email changes that the site refuses (the address is in use or on the blacklist).
+- Moving a season to a different series, season covers, and image removal in the UI.
+- Rejecting a username change in the admin page, and declining a friend request.
 - Keyboard and screen-reader use, and browsers other than Chromium.
 - A real `helm upgrade` or `helm uninstall` on the live install. Both were tested on a test install.
