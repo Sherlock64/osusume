@@ -10,6 +10,7 @@ import {
 import { and, asc, count, eq, exists, inArray, or, sql } from 'drizzle-orm';
 import { displayName } from '../auth/accounts.ts';
 import { coverColumns, primaryImageOf } from '../catalog/entries.ts';
+import { seriesMatchingSearch } from '../catalog/search.ts';
 import type { Database } from '../db/client.ts';
 import {
   friendship,
@@ -154,14 +155,15 @@ export const ratingOrDefault = sql<number>`coalesce(${seriesRating.rating}, ${SE
  * A page of a user's list, one item per series, by title. A series is in the page if any of its
  * seasons on the list has the status asked for. Each item still holds all its seasons on the
  * list and its status comes from all of them, with `matched` marking the ones that matched. A
- * rating, given only for the owner's own list, keeps series with that rating.
+ * rating, given only for the owner's own list, keeps series with that rating; so does a search
+ * `q`, kept in title order so the title cursor still pages.
  */
 export async function loadListPage(
   db: Database,
   ownerId: string,
-  query: Omit<ListQuery, 'cursor'> & { cursor: Cursor<string> | undefined; rating?: SeriesRating },
+  query: Omit<ListQuery, 'cursor'> & { cursor: Cursor<string> | undefined; rating?: SeriesRating; q?: string },
 ) {
-  const { limit, status, rating } = query;
+  const { limit, status, rating, q } = query;
   const page = keyset({ sortColumn: series.title, idColumn: series.id, cursor: query.cursor });
   const seriesRows = await db
     .select({ id: series.id, title: series.title, cover: coverColumns, rating: ratingOrDefault })
@@ -184,6 +186,7 @@ export async function loadListPage(
             ),
         ),
         rating === undefined ? undefined : eq(ratingOrDefault, rating),
+        q === undefined || q === '' ? undefined : seriesMatchingSearch(q),
         page.where,
       ),
     )

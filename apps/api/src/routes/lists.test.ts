@@ -219,6 +219,65 @@ describe('the watch list', () => {
     expect(seen).toEqual(expected);
   });
 
+  it('searches the own list by title, alternate title and season, with the other filters', async () => {
+    const member = await t.seedLoggedIn();
+    const naruto = await seedSeries(2, 'Naruto');
+    const viaAlt = await t.request(
+      'POST',
+      '/api/v1/series',
+      { title: 'Search Alt Parent', altTitles: ['Naruto Gaiden'] },
+      { cookie: admin.cookie },
+    );
+    const altId = (viaAlt.body as { id: string }).id;
+    const altSeason = await t.request(
+      'POST',
+      '/api/v1/seasons',
+      { seriesId: altId, ordinal: 1, title: 'Season 1' },
+      { cookie: admin.cookie },
+    );
+    const viaSeason = await seedSeries(0, 'Search Season Parent');
+    const narutoSeason = await t.request(
+      'POST',
+      '/api/v1/seasons',
+      { seriesId: viaSeason.id, ordinal: 1, title: 'Naruto Shippuden' },
+      { cookie: admin.cookie },
+    );
+    const other = await seedSeries(1, 'Search Unrelated');
+    await put(member.cookie, naruto.seasonIds[0] ?? '', { status: 'watching' });
+    await put(member.cookie, naruto.seasonIds[1] ?? '', { status: 'completed' });
+    await put(member.cookie, (altSeason.body as { id: string }).id, { status: 'completed' });
+    await put(member.cookie, (narutoSeason.body as { id: string }).id, { status: 'completed' });
+    await put(member.cookie, other.seasonIds[0] ?? '', { status: 'watching' });
+    await t.request('PUT', `/api/v1/me/ratings/${altId}`, { rating: 5 }, { cookie: member.cookie });
+    const ids = async (query: string) =>
+      ((await myList(member.cookie, query)).body as ListBody).items.map((item) => item.seriesId);
+
+    const all = [naruto.id, altId, viaSeason.id, other.id];
+    const matches = [naruto.id, altId, viaSeason.id];
+    expect(new Set(await ids('?q=narto'))).toEqual(new Set(matches));
+    expect(new Set(await ids('?q=%20%20'))).toEqual(new Set(all));
+    expect(await ids('?q=narto&status=watching')).toEqual([naruto.id]);
+    expect(await ids('?q=narto&rating=5')).toEqual([altId]);
+    expect(await ids('?q=narto&status=watching&rating=5')).toEqual([]);
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const query: string = `?q=narto&limit=1${cursor === null ? '' : `&cursor=${cursor}`}`;
+      const body = (await myList(member.cookie, query)).body as ListBody;
+      seen.push(...body.items.map((item) => item.seriesId));
+      cursor = body.nextCursor;
+    } while (cursor !== null);
+    expect(seen.sort()).toEqual([...matches].sort());
+
+    expectError(await myList(member.cookie, `?q=${'x'.repeat(201)}`), 400, 'validation_error');
+    expect(await ids(`?q=${'x'.repeat(200)}`)).toEqual([]);
+    await setVisibility(member.cookie, 'members');
+    const viewer = await t.seedLoggedIn();
+    const theirs = (await memberList(viewer.cookie, member.enteredUsername, '?q=zzzz')).body as ListBody;
+    expect(theirs.items).toHaveLength(all.length);
+  });
+
   it('answers bad input with a 400, never a 500', async () => {
     const member = await t.seedLoggedIn();
     const seasonId = (await seedSeries(1)).seasonIds[0] ?? '';
